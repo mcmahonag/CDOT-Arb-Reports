@@ -51,3 +51,15 @@ drop policy if exists "signed in: all" on public.tree_notes;
 create policy "signed in: all" on public.reports      for all to authenticated using (true) with check (true);
 create policy "signed in: all" on public.report_trees for all to authenticated using (true) with check (true);
 create policy "signed in: all" on public.tree_notes   for all to authenticated using (true) with check (true);
+
+-- Hand-adjusted tree positions (drag the pin in the app). Keyed by tree, so they carry across months.
+create table if not exists public.tree_locations (
+  tree_key   text primary key,
+  lat        double precision not null,
+  lng        double precision not null,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+alter table public.tree_locations enable row level security;
+drop policy if exists "signed in: all" on public.tree_locations;
+create policy "signed in: all" on public.tree_locations for all to authenticated using (true) with check (true);

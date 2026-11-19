@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
 <script src="parser.js"></script>
+<script src="geocode.js"></script>
 <style>
   :root {
     --ink: #17201b; --ink-2: #4f5a53; --ink-3: #7c867f;
@@ -87,6 +88,8 @@
   .dot.tree { background: var(--tree); }
   .dot.issue { background: var(--issue); }
   .dot.vacant { border: 2px solid var(--vacant); background: #fff; }
+  .adjust { position: absolute; z-index: 600; top: 12px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 24px)); background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .adjust .adj-actions { margin-left: auto; display: flex; gap: 6px; }
   .legend .note { color: var(--ink-3); margin-top: 3px; max-width: 220px; }
 
   /* Table */
@@ -277,11 +280,15 @@
     </div>
     <section class="view" id="view-map">
       <div id="map"></div>
+      <div class="adjust hidden" id="adjust">
+        <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Aerial (top right) to see the median.</div></div>
+        <div class="adj-actions"><button class="btn small" id="adj-reset" title="Remove your adjustment and go back to the street centerline">Reset</button><button class="btn small" id="adj-cancel">Cancel</button><button class="btn primary small" id="adj-save">Save location</button></div>
+      </div>
       <div class="legend">
         <div><span class="dot tree"></span>Tree</div>
         <div><span class="dot issue"></span>Tree with condition noted</div>
         <div><span class="dot vacant"></span>Vacant / removed</div>
-        <div class="note">Positions are approximate, placed from the Chicago address grid.</div>
+        <div class="note" id="legend-note">Placed on City street centerlines from each report address. Drag-adjusted spots are exact.</div>
       </div>
     </section>
     <section class="view hidden" id="view-table"></section>
@@ -342,6 +349,7 @@
     f: { q: '', site: '', genus: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' },
     sort: { key: 'site', dir: 1 },
     notes: new Map(),         // tree_key -> [note]
+    locs: new Map(),          // tree_key -> {lat, lng} saved adjustments
     tableLimit: 300,
     filtered: [],
   };
@@ -392,13 +400,11 @@
     S.notes = new Map();
     for (const n of data) { if (!S.notes.has(n.tree_key)) S.notes.set(n.tree_key, []); S.notes.get(n.tree_key).push(n); }
   }
-  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy'];
+  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy','gNum','gDir','aNum','aDir','dirGuess'];
   function compact(t) { const o = {}; for (const [k, v] of Object.entries(t)) if (v !== '' && v != null && k !== 'region' && k !== 'key') o[k] = v; return o; }
   function expand(d, report, key) {
-    const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng','gx','gy'].includes(k) ? null : '');
+    const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng','gx','gy','gNum','aNum'].includes(k) ? null : '');
     Object.assign(t, d, { key, region: report.region, month: report.month });
-    // Recompute position from the stored address grid so placement fixes apply without re-importing
-    if (t.gx != null && t.gy != null) Object.assign(t, ArbParser.gridToLatLng(t.gx, t.gy));
     return t;
   }
 
@@ -416,7 +422,36 @@
   async function currentTrees() {
     const reps = activeReports();
     if (!S.local) await Promise.all(reps.map(loadTrees));
-    return reps.flatMap(r => r.trees || []);
+    const list = reps.flatMap(r => r.trees || []);
+    list.forEach(place);
+    return list;
+  }
+
+  // ---------- Placement ----------
+  // Order: your saved adjustment > street centerline > grid estimate. Recomputed on load,
+  // so placement improvements apply to reports already in the database.
+  let GEO = null, geoVer = 0;
+  async function loadCenterlines() {
+    try {
+      const data = await fetch('data/centerlines.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+      GEO = ArbGeo.build(data); geoVer++;
+      if (allTrees.length) refresh();
+    } catch (e) { console.warn('Centerlines not loaded', e); }
+  }
+  function place(t) {
+    const fix = S.locs.get(t.key);
+    if (fix) { t.lat = fix.lat; t.lng = fix.lng; t.how = 'manual'; t._pv = -1; return; }
+    if (t._pv === geoVer) return;
+    if (t._approx === undefined) t._approx = t.gx != null && t.gy != null ? ArbParser.gridToLatLng(t.gx, t.gy) : (t.lat != null ? { lat: t.lat, lng: t.lng } : null);
+    const p = GEO ? ArbGeo.locate(GEO, t, t._approx) : (t._approx ? { ...t._approx, how: 'approx' } : null);
+    if (p) { t.lat = p.lat; t.lng = p.lng; t.how = p.how; } else { t.lat = null; t.lng = null; t.how = ''; }
+    t._pv = geoVer;
+  }
+  async function loadLocs() {
+    if (S.local) return;
+    const { data, error } = await sb.from('tree_locations').select('tree_key, lat, lng');
+    if (error) { console.warn('tree_locations', error.message); S.locsMissing = true; return; }
+    S.locs = new Map(data.map(r => [r.tree_key, { lat: r.lat, lng: r.lng }]));
   }
 
   // ---------- Header ----------
@@ -724,10 +759,14 @@
       ${S.local ? '' : `<div class="sec">Notes</div><div id="d-notes"></div>
         <textarea id="d-note" placeholder="Add a note (e.g. sent to contractor, checked on site)"></textarea>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="d-fu"> Flag for follow-up</label><button class="btn primary small" id="d-add" style="margin-left:auto">Add note</button></div>`}
-      ${t.lat != null ? `<div class="sec">Location</div><a href="https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}" target="_blank" rel="noopener">Open approximate spot in Google Maps</a> <span class="muted">· from the address grid</span>` : ''}
+      ${t.lat != null ? `<div class="sec">Location</div>
+        <div style="margin-bottom:8px">${{ manual: 'Adjusted by hand', centerline: 'On the street centerline at this address', snapped: 'Snapped to the nearest point on this street (diagonal or non-grid street)', approx: 'Approximate — the report address didn’t match a City block. Worth adjusting.' }[t.how] || ''}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${S.local ? '' : '<button class="btn small" id="d-move">Adjust location</button>'}
+        <a href="https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}" target="_blank" rel="noopener">Open in Google Maps</a></div>` : ''}
     `;
     $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').classList.remove('hidden');
     if (!S.local) { renderNotes(t.key); $('#d-add').onclick = () => addNote(t.key); }
+    const mv = $('#d-move'); if (mv) mv.onclick = () => startAdjust(t);
     renderHistory(t);
   }
   function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.add('hidden'); $('#filters').classList.remove('open'); openKey = null; }
@@ -772,9 +811,45 @@
     if (S.view === 'table') renderTable();
   }
 
+  // ---------- Adjust location ----------
+  let adj = null;
+  function startAdjust(t) {
+    if (S.locsMissing) return toast('Run supabase/002_tree_locations.sql in Supabase first to enable saved locations.', 6000);
+    closeDrawer(); setView('map');
+    setTimeout(() => {
+      map.invalidateSize();
+      map.setView([t.lat, t.lng], 19);
+      if (adj) adj.marker.remove();
+      const marker = L.marker([t.lat, t.lng], { draggable: true, autoPan: true }).addTo(map);
+      adj = { t, marker };
+      $('#adj-name').textContent = '· ' + speciesName(t) + ' at ' + addr(t);
+      $('#adj-reset').classList.toggle('hidden', !S.locs.has(t.key));
+      $('#adjust').classList.remove('hidden');
+    }, 50);
+  }
+  function endAdjust() { if (adj) adj.marker.remove(); adj = null; $('#adjust').classList.add('hidden'); }
+  $('#adj-cancel').onclick = endAdjust;
+  $('#adj-save').onclick = async () => {
+    if (!adj) return;
+    const ll = adj.marker.getLatLng(), t = adj.t;
+    const row = { tree_key: t.key, lat: +ll.lat.toFixed(7), lng: +ll.lng.toFixed(7), updated_by: S.user?.email || null, updated_at: new Date().toISOString() };
+    const { error } = await sb.from('tree_locations').upsert(row);
+    if (error) return toast('Could not save location: ' + error.message, 5000);
+    S.locs.set(t.key, { lat: row.lat, lng: row.lng }); place(t);
+    endAdjust(); renderMap(); toast('Location saved. It stays put in future reports.');
+  };
+  $('#adj-reset').onclick = async () => {
+    if (!adj) return;
+    const t = adj.t;
+    const { error } = await sb.from('tree_locations').delete().eq('tree_key', t.key);
+    if (error) return toast(error.message);
+    S.locs.delete(t.key); t._pv = null; place(t);
+    endAdjust(); renderMap(); toast('Back on the street centerline.');
+  };
+
   // ---------- CSV ----------
   function exportCsv() {
-    const cols = ['region', 'site', 'planter', 'treeNo', 'address', 'addrDir', 'cross', 'side', 'status', 'genus', 'species', 'cultivar', 'code', 'dbh', 'pruned', 'pruneCat', 'removalCat', 'deadwood', 'wounds', 'pests', 'treated', 'product', 'lean', 'hazard', 'planted', 'removed', 'reason', 'comments', 'id', 'month', 'lat', 'lng'];
+    const cols = ['region', 'site', 'planter', 'treeNo', 'address', 'addrDir', 'cross', 'side', 'status', 'genus', 'species', 'cultivar', 'code', 'dbh', 'pruned', 'pruneCat', 'removalCat', 'deadwood', 'wounds', 'pests', 'treated', 'product', 'lean', 'hazard', 'planted', 'removed', 'reason', 'comments', 'id', 'month', 'lat', 'lng', 'how'];
     const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const lines = [cols.join(',')].concat(sorted(S.filtered).map(t => cols.map(c => q(c === 'region' ? RMAP[t.region].name : t[c])).join(',')));
     const a = document.createElement('a');
@@ -916,7 +991,7 @@
   async function start() {
     S.local = false;
     enterApp(false);
-    await Promise.all([loadReports(), loadNotes()]);
+    await Promise.all([loadReports(), loadNotes(), loadLocs()]);
     renderRegions(); refresh(true);
   }
 
@@ -926,6 +1001,7 @@
     if (data.session) { S.user = data.session.user; await start(); } else showLogin();
   }
   renderRegions();
+  loadCenterlines();
   boot();
 })();
 </script>

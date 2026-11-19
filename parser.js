@@ -226,7 +226,7 @@
         pruneCat: sizeClass(str(g('pruneCat'))),
         removalCat: sizeClass(str(g('removalCat'))),
         status: vacant ? (removed ? 'removed' : 'vacant') : genus ? 'tree' : 'unknown',
-        lat: null, lng: null, gx: null, gy: null,
+        lat: null, lng: null, gx: null, gy: null, gNum: null, gDir: '', aNum: null, aDir: '', dirGuess: false,
       };
       // Approximate location from the Chicago grid
       const gnum = num(carry.grid), anum = num(address);
@@ -239,12 +239,17 @@
         else if (region === 'southwest' || region === 'southeast') b = signed(anum, 'S');
       }
       // Both directions on the same axis (e.g. Roosevelt "1200 W"): treat the street number as N/S
-      let aa = a;
-      if (a && b && a.axis === b.axis) aa = { axis: a.axis === 'x' ? 'y' : 'x', v: (region === 'north' ? 1 : -1) * Math.abs(a.v) };
+      let aa = a, guessed = !!(a && anum != null && !(carry.addrDir || titleDir));
+      if (a && b && a.axis === b.axis) { aa = { axis: a.axis === 'x' ? 'y' : 'x', v: (region === 'north' ? 1 : -1) * Math.abs(a.v) }; guessed = true; }
       if (aa && b && aa.axis !== b.axis) {
-        const a = aa;
-        const x = a.axis === 'x' ? a.v : b.v, y = a.axis === 'y' ? a.v : b.v;
-        Object.assign(t, gridToLatLng(x, y), { gx: x, gy: y });
+        const x = aa.axis === 'x' ? aa.v : b.v, y = aa.axis === 'y' ? aa.v : b.v;
+        const dirOf = p => (p.axis === 'x' ? (p.v < 0 ? 'W' : 'E') : (p.v < 0 ? 'S' : 'N'));
+        Object.assign(t, gridToLatLng(x, y), {
+          gx: x, gy: y,
+          gNum: Math.abs(aa.v), gDir: dirOf(aa),   // the street the median is on, e.g. 1600 W = Ashland
+          aNum: Math.abs(b.v), aDir: dirOf(b),     // address along it, e.g. 1608 N
+          dirGuess: guessed,
+        });
       }
       trees.push(t);
     }

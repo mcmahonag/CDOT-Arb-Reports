@@ -18,7 +18,10 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `index.html` | The app |
 | `parser.js` | Reads a report workbook (one tab per site) into tree records |
 | `config.js` | Your Supabase URL and anon key, plus the region and contractor list |
+| `geocode.js` | Places trees on street centerlines |
+| `data/centerlines.json` | City of Chicago street centerlines, trimmed to arterials plus the streets in the reports |
 | `supabase/schema.sql` | Tables and access rules. Run this once in Supabase |
+| `supabase/002_tree_locations.sql` | Adds saved tree positions. Run it if you set up the database before this was added |
 
 ## Setup (about 15 minutes)
 
@@ -35,7 +38,8 @@ Without Supabase details in `config.js`, the app still works. Importing just sho
 
 - **Each site tab is read; the Summary and SortSheet tabs are skipped.** Tabs whose names end in "OLD" are also skipped. The importer lists anything it skipped.
 - **Vacant spots.** "NO TREE" rows count as *vacant*, or as *removed* when they have a Tree Removed date.
-- **Map positions are approximate.** They come from the Chicago address grid (e.g. 1600 W / 1608 N), not GPS, and are usually within a block-face. When a tab leaves out the address direction, the app falls back to the most likely one for that region.
+- **Map positions** come from the City's Street Center Lines (`data/centerlines.json`). Each row's street number (e.g. 1600 W = Ashland) picks the street, and its address (e.g. 1608 N) is placed along that block's centerline. Spelling and abbreviations in the reports don't matter. Divided roads drawn as two one-way lines are averaged, so those trees land in the median. Diagonal streets (Archer, Ogden, Wacker) snap to the nearest point on the street. Anything left over can be dragged into place with **Adjust location** in the tree panel, and that position is kept for every future report.
+- **Updating the centerlines:** download a new CSV from data.cityofchicago.org/d/6imu-meau and run `python3 tools/build_centerlines.py the-file.csv`. Add street names after the file name to include smaller streets.
 - **Tree history.** A tree is matched across months by region + site + planter + tree number + address. If a contractor renumbers a site, the history for that site starts over.
 - **Conditions flagged:** pests or disease noted, deadwood of 20% or more, an ISA hazard rating, lean, trunk wounds, and "Monitor" in the comments.
 
