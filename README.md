@@ -21,7 +21,10 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `geocode.js` | Places trees on street centerlines |
 | `data/centerlines.json` | City of Chicago street centerlines, trimmed to arterials plus the streets in the reports |
 | `supabase/schema.sql` | Tables and access rules. Run this once in Supabase |
-| `supabase/002_tree_locations.sql` | Adds saved tree positions. Run it if you set up the database before this was added |
+| `supabase/002_tree_locations.sql` | Saved tree positions (run if your database predates it) |
+| `supabase/003_location_source.sql` | Records GPS accuracy on saved positions |
+| `supabase/004_roles_field_reports.sql` | Staff/contractor roles, region-based access, field reports, photos |
+| `supabase/005_work_orders.sql` | Work orders and the completion function that updates reports |
 
 ## Setup (about 15 minutes)
 
@@ -48,3 +51,38 @@ Without Supabase details in `config.js`, the app still works. Importing just sho
 - Your notes are saved per tree. Notes flagged *follow-up* show in the table and in the *My follow-ups* filter until you mark them resolved.
 - *Export CSV* downloads whatever the current filters show.
 - Keep the report workbooks out of the GitHub repo if it's public. The data lives in Supabase behind sign-in.
+
+## Database updates (run in order, once each)
+
+In Supabase → SQL Editor, run each file from the `supabase` folder:
+
+1. `003_location_source.sql`
+2. `004_roles_field_reports.sql`: everyone who already has a login becomes **staff**. It also creates the private `tree-photos` storage bucket. If that part errors, create a **private** bucket named `tree-photos` under Storage and run the file again.
+3. `005_work_orders.sql`
+
+For a brand-new database, run `schema.sql`, then 004 and 005. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
+
+## Roles
+
+- **Staff** see everything, import Excel reports, issue work orders, add notes and manage people.
+- **Contractors** see only their regions. They fill in field reports, GPS trees, add trees and photos, and complete work orders. They can't see staff notes.
+- **Pending:** every new login starts here with no access. Add the login in Supabase (Authentication → Users), then open **People** in the app to set the role, company and regions.
+
+## Field reports (replacing the Excel)
+
+1. Open **Reports** and choose **Start field report** for a region. The latest report's trees are copied into a draft for this month.
+2. In the field, open a tree and choose **Edit inspection**. Saving marks it inspected, and the header shows "X of Y inspected". Use the *Not inspected yet* filter to find what's left.
+3. You can also **GPS the tree**, **add a photo**, or use **＋ Add tree** for trees missing from the report.
+4. **Submit** in Reports locks the draft for the contractor. Staff can **Reopen** it. **Excel** downloads any report in the original layout (one tab per site), with lat/long and who inspected each tree.
+
+## Location survey
+
+**📍 Survey locations** on the map opens a site's tree list with GPS running continuously. Stand at any tree, in any order (multi-row medians are fine), and tap **Here** on its card. You can tap a dot on the map to find its card. GPS points override the street-centerline estimate and carry forward to every future report. Staff can clear a site's GPS points to start over.
+
+## Work orders
+
+- **Issue:** staff issue an order from a tree's panel (prune, remove, treat, inspect), or use **Work order for these trees** to cover everything in the current filter, e.g. a storm event.
+- **Alert:** contractors see a count on the **Work orders** button and a ring around each ordered tree on the map (red = urgent).
+- **Complete:** **Mark complete** records the date and notes and updates the tree in the latest report. Prune sets the last-pruned date, remove marks the tree removed, and treat sets the treatment date.
+- Alerts are in the app only. Email notifications would need an email service connected to Supabase.
+

@@ -250,6 +250,7 @@
         const dirOf = p => (p.axis === 'x' ? (p.v < 0 ? 'W' : 'E') : (p.v < 0 ? 'S' : 'N'));
         Object.assign(t, gridToLatLng(x, y), {
           gx: x, gy: y,
+          gridRaw: gnum, gridDirRaw: String(carry.gridDir || '').replace('.', '').toUpperCase(),  // as written, for Excel export
           gNum: Math.abs(aa.v), gDir: dirOf(aa),   // the street the median is on, e.g. 1600 W = Ashland
           aNum: Math.abs(b.v), aDir: dirOf(b),     // address along it, e.g. 1608 N
           dirGuess: guessed,

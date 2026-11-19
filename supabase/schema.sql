@@ -1,5 +1,6 @@
 -- CDOT Arborist Reports — Supabase schema
--- Run once in Supabase: SQL Editor -> New query -> paste -> Run.
+-- New setup: run this file once, then 004_roles_field_reports.sql.
+-- Don't re-run this file after 004: it would re-open access to every signed-in user.
 
 -- One row per monthly report per region (re-importing the same region + month replaces it)
 create table if not exists public.reports (
