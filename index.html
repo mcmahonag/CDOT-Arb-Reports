@@ -175,6 +175,12 @@
   .file-row .res.err { color: var(--danger); }
   .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
   .muted { color: var(--ink-3); }
+  .rep-list { margin-top: 16px; }
+  .rep-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 0 0 6px; font-weight: 600; }
+  .rep-row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; }
+  .rep-row .fn { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rep-row button { margin-left: auto; flex: none; }
+  .btn.danger { color: var(--danger); border-color: #f1c9c5; }
 
   /* Login */
   .login { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -217,7 +223,7 @@
   <div class="regions" id="regions"></div>
   <div class="spacer"></div>
   <select id="month" aria-label="Report month"></select>
-  <button class="btn-light" id="btn-import">Import reports</button>
+  <button class="btn-light" id="btn-import">Reports</button>
   <button class="btn-ghost hidden" id="btn-signout">Sign out</button>
 </header>
 <div class="banner hidden" id="banner"></div>
@@ -308,7 +314,7 @@
 
 <div class="modal-wrap hidden" id="import">
   <div class="modal" role="dialog" aria-labelledby="imp-title">
-    <header><h2 id="imp-title">Import arborist reports</h2><button class="x btn small" style="margin-left:auto" id="imp-close">Close</button></header>
+    <header><h2 id="imp-title">Reports</h2><button class="x btn small" style="margin-left:auto" id="imp-close">Close</button></header>
     <div class="body">
       <label class="drop" id="drop">
         <input type="file" id="imp-file" multiple accept=".xls,.xlsx,.xlsm" class="hidden">
@@ -316,6 +322,7 @@
         <div class="muted" style="font-size:12px;margin-top:4px">.xls, .xlsx or .xlsm · one tab per site, like the monthly arborist reports</div>
       </label>
       <div id="imp-files"></div>
+      <div id="imp-existing"></div>
       <div class="actions">
         <span class="muted" id="imp-msg" style="margin-right:auto;font-size:12px;align-self:center"></span>
         <button class="btn" id="imp-local" disabled>View on this device only</button>
@@ -562,7 +569,7 @@
   }
   function renderView(fit) {
     if (!activeReports().length) {
-      const msg = `<div class="empty-state"><b>No reports ${S.region === 'all' ? 'yet' : 'for ' + esc(RMAP[S.region].name) + (S.month === 'latest' ? '' : ' in ' + fmtMonth(S.month))}</b>Use <b style="display:inline">Import reports</b> to add the monthly arborist workbooks.</div>`;
+      const msg = `<div class="empty-state"><b>No reports ${S.region === 'all' ? 'yet' : 'for ' + esc(RMAP[S.region].name) + (S.month === 'latest' ? '' : ' in ' + fmtMonth(S.month))}</b>Use <b style="display:inline">Reports</b> to import the monthly arborist workbooks.</div>`;
       ['table', 'sites', 'summary'].forEach(k => $('#view-' + k).innerHTML = msg);
       if (map) markers.clearLayers();
       return;
@@ -860,7 +867,27 @@
 
   // ---------- Import ----------
   let pending = []; // {file, region, month, parsed?, error?}
-  $('#btn-import').onclick = () => { pending = []; renderPending(); $('#import').classList.remove('hidden'); };
+  $('#btn-import').onclick = () => { pending = []; renderPending(); renderExisting(); $('#import').classList.remove('hidden'); };
+  function renderExisting() {
+    const list = [...S.reports].sort((a, b) => a.region.localeCompare(b.region) || b.month.localeCompare(a.month));
+    $('#imp-existing').innerHTML = !list.length ? '' : `<div class="rep-list"><h3>Loaded reports</h3>` + list.map((r, i) => `
+      <div class="rep-row"><div style="min-width:0"><b>${esc(RMAP[r.region]?.name || r.region)}</b> · ${esc(fmtMonth(r.month))} · ${nf(r.tree_count ?? (r.trees || []).length)} rows
+      <div class="fn">${esc(r.file_name || '')}${r.id ? '' : ' · this device only'}</div></div>
+      <button class="btn small danger" data-i="${i}">Delete</button></div>`).join('') + '</div>';
+    $('#imp-existing').querySelectorAll('button[data-i]').forEach(b => b.onclick = () => deleteReport(list[+b.dataset.i], b));
+  }
+  async function deleteReport(r, btn) {
+    const label = `${RMAP[r.region]?.name || r.region} ${fmtMonth(r.month)}`;
+    if (!confirm(`Delete the ${label} report and its ${nf(r.tree_count ?? (r.trees || []).length)} rows? Notes and adjusted locations are kept.`)) return;
+    btn.disabled = true; btn.textContent = 'Deleting…';
+    if (r.id && !S.local) {
+      const { error } = await sb.from('reports').delete().eq('id', r.id);
+      if (error) { btn.disabled = false; btn.textContent = 'Delete'; return toast('Could not delete: ' + error.message, 5000); }
+    }
+    S.reports = S.reports.filter(x => x !== r);
+    renderExisting(); renderRegions(); refresh(true);
+    toast(label + ' deleted.');
+  }
   $('#imp-close').onclick = () => $('#import').classList.add('hidden');
   $('#imp-file').onchange = e => addFiles(e.target.files);
   const drop = $('#drop');
@@ -957,6 +984,7 @@
         p.status = `Saved · ${nf(rows.length)} rows`; renderPending();
       }
       await loadReports();
+      renderExisting();
       $('#import').classList.add('hidden');
       renderRegions(); refresh(true);
       toast('Reports saved.');

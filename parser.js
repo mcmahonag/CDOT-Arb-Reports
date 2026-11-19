@@ -184,6 +184,8 @@
         const v = g(k);
         if (v !== '') carry[k] = v;
       }
+      // Street number 0 is real (State St, Madison St) when a direction is given
+      if (cols.grid != null && r[cols.grid] === 0 && g('gridDir')) carry.grid = '0';
       let id = g('id');
       if (id === '' && cols.id == null) {
         // ID code sometimes sits in an unlabeled column past the last header
@@ -229,7 +231,9 @@
         lat: null, lng: null, gx: null, gy: null, gNum: null, gDir: '', aNum: null, aDir: '', dirGuess: false,
       };
       // Approximate location from the Chicago grid
-      const gnum = num(carry.grid), anum = num(address);
+      let gnum = num(carry.grid), anum = num(address);
+      if (gnum != null && (gnum < 0 || gnum > 14000)) gnum = null;   // typo in the report
+      if (anum != null && (anum < 0 || anum > 14000)) anum = null;
       const a = gnum != null ? signed(gnum, carry.gridDir) : null;
       let b = anum != null ? signed(anum, carry.addrDir || titleDir) : null;
       // Fallbacks when a tab leaves out the address direction (approximate)

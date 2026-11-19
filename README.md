@@ -30,7 +30,7 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 3. **Add users.** Go to *Authentication → Users → Add user*, enter an email and password, and check *Auto Confirm User*. Under *Authentication → Sign In / Providers → Email*, turn off *Allow new users to sign up* so only people you add can get in.
 4. **Connect the app.** Under *Project Settings → API*, copy the Project URL and the `anon` `public` key into `config.js`.
 5. **Publish on GitHub Pages.** Create a repo (e.g. `cdot-arborist-reports`) and upload these files. Then go to *Settings → Pages → Deploy from branch → main / root*. The app will be at `https://<your-user>.github.io/cdot-arborist-reports/`.
-6. **Import the reports.** Sign in, click *Import reports*, and choose the workbooks. The app guesses the region and month from each file name (e.g. "North … October 2026", "SW …", "ASH Central …"), and you can correct them before saving. Saving a region + month that already exists replaces it.
+6. **Import the reports.** Sign in, click *Reports*, and choose the workbooks. The app guesses the region and month from each file name (e.g. "North … October 2026", "SW …", "ASH Central …"), and you can correct them before saving. Saving a region + month that already exists replaces it. To remove one, open *Reports* and click *Delete* next to it.
 
 Without Supabase details in `config.js`, the app still works. Importing just shows the reports on that device and saves nothing.
 

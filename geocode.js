@@ -7,14 +7,19 @@
 (function (root) {
   const OPP = { N: 'S', S: 'N', E: 'W', W: 'E' };
   const ALIASES = { LSD: 'LAKE SHORE', 'LAKE SHORE DRIVE': 'LAKE SHORE', MICH: 'MICHIGAN', ROOS: 'ROOSEVELT', CONG: 'CONGRESS',
-    LASALLE: 'LA SALLE', 'IRVING PK': 'IRVING PARK', 'IRVING': 'IRVING PARK', MLK: 'DR MARTIN LUTHER KING JR', 'KING': 'DR MARTIN LUTHER KING JR' };
+    LASALLE: 'LA SALLE', 'IRVING PK': 'IRVING PARK', 'IRVING': 'IRVING PARK', MLK: 'DR MARTIN LUTHER KING JR', 'KING': 'DR MARTIN LUTHER KING JR', 'KING DR': 'DR MARTIN LUTHER KING JR',
+    'US 41': 'SOUTH SHORE', US41: 'SOUTH SHORE', INDY: 'INDIANAPOLIS', STONY: 'STONY ISLAND' };
   const TYPES = /\b(AVENUE|AVE|STREET|ST|ROAD|RD|DRIVE|DR|BOULEVARD|BLVD|PARKWAY|PKWY|PLACE|PL|COURT|CT|HIGHWAY|HWY)\b\.?/g;
 
   function normName(s) {
     let n = String(s || '').toUpperCase().replace(/[.,']/g, ' ').replace(/\s+/g, ' ').trim();
     n = n.replace(/^(NORTH|SOUTH|EAST|WEST|UPPER|LOWER|N|S|E|W)\s+/, '');
     if (ALIASES[n]) return ALIASES[n];
+    const lettered = n.match(/^AVE(?:NUE)?\.?\s+([A-O])$/);
+    if (lettered) return 'AVENUE ' + lettered[1];
     n = n.replace(TYPES, '').replace(/\s+/g, ' ').trim();
+    const av = n.match(/^AVE(?:NUE)?\s+([A-O])$/) || n.match(/^AVENUE\s+([A-O])$/);
+    if (av) return 'AVENUE ' + av[1];
     return ALIASES[n] || n;
   }
 
@@ -89,7 +94,16 @@
    * @param approx {lat,lng} grid estimate to fall back on / snap from
    * @returns {lat, lng, how} how = 'centerline' | 'snapped' | 'approx'
    */
+  // Anything outside the city is a typo in the report, not a real spot
+  const inChicago = p => p && p.lat > 41.62 && p.lat < 42.05 && p.lng > -87.96 && p.lng < -87.50;
+
   function locate(idx, t, approx) {
+    if (approx && !inChicago(approx)) approx = null;
+    const r = locateRaw(idx, t, approx);
+    return r && inChicago(r) ? r : null;
+  }
+
+  function locateRaw(idx, t, approx) {
     if (!idx || !t || t.gNum == null || t.aNum == null) return approx ? { ...approx, how: 'approx' } : null;
     const dirs = t.dirGuess ? [t.aDir, OPP[t.aDir]] : [t.aDir];
     // 1) Street by grid number (spelling doesn't matter), address within the block
