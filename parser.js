@@ -80,13 +80,26 @@
     return isFinite(n) ? n : null;
   }
 
-  // Chicago address grid -> approximate lat/lng. 800 address units = 1 mile, origin State & Madison.
-  const ORIGIN = { lat: 41.88206, lng: -87.62779 };
+  // Chicago address grid -> approximate lat/lng. Origin State & Madison.
+  // North and east/west: 800 address units per mile. South side runs faster near downtown:
+  // Roosevelt (1200 S) = 1 mi, Cermak (2200 S) = 2 mi, 31st (3100 S) = 3 mi, Pershing (3900 S) = 4 mi,
+  // then 800 per mile.
+  const ORIGIN = { lat: 41.88194, lng: -87.62780 };
+  const SOUTH = [[0, 0], [1200, 1], [2200, 2], [3100, 3], [3900, 4]];
+  function southMiles(u) {
+    for (let i = 1; i < SOUTH.length; i++) {
+      const [u0, m0] = SOUTH[i - 1], [u1, m1] = SOUTH[i];
+      if (u <= u1) return m0 + (u - u0) / (u1 - u0) * (m1 - m0);
+    }
+    return 4 + (u - 3900) / 800;
+  }
   function gridToLatLng(x, y) {
-    return {
-      lat: +(ORIGIN.lat + (y / 800) * 0.0144927).toFixed(6),
-      lng: +(ORIGIN.lng + (x / 800) * 0.0194175).toFixed(6),
-    };
+    const miN = y >= 0 ? y / 800 : -southMiles(-y);
+    const lat = ORIGIN.lat + miN * 0.0144927;
+    const lngPerMile = 1 / (69.172 * Math.cos(lat * Math.PI / 180));
+    // N-S streets tilt slightly east going south (~30 m per mile); west side miles run ~1.7% long
+    const miE = (x / 800) * 1.017 - miN * (30 / 1609.344);
+    return { lat: +lat.toFixed(6), lng: +(ORIGIN.lng + miE * lngPerMile).toFixed(6) };
   }
   function signed(n, dir) {
     const d = String(dir || '').trim().toUpperCase()[0];
@@ -213,7 +226,7 @@
         pruneCat: sizeClass(str(g('pruneCat'))),
         removalCat: sizeClass(str(g('removalCat'))),
         status: vacant ? (removed ? 'removed' : 'vacant') : genus ? 'tree' : 'unknown',
-        lat: null, lng: null,
+        lat: null, lng: null, gx: null, gy: null,
       };
       // Approximate location from the Chicago grid
       const gnum = num(carry.grid), anum = num(address);
@@ -231,7 +244,7 @@
       if (aa && b && aa.axis !== b.axis) {
         const a = aa;
         const x = a.axis === 'x' ? a.v : b.v, y = a.axis === 'y' ? a.v : b.v;
-        Object.assign(t, gridToLatLng(x, y));
+        Object.assign(t, gridToLatLng(x, y), { gx: x, gy: y });
       }
       trees.push(t);
     }

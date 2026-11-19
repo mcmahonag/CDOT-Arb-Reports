@@ -392,11 +392,14 @@
     S.notes = new Map();
     for (const n of data) { if (!S.notes.has(n.tree_key)) S.notes.set(n.tree_key, []); S.notes.get(n.tree_key).push(n); }
   }
-  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng'];
+  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy'];
   function compact(t) { const o = {}; for (const [k, v] of Object.entries(t)) if (v !== '' && v != null && k !== 'region' && k !== 'key') o[k] = v; return o; }
   function expand(d, report, key) {
-    const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng'].includes(k) ? null : '');
-    return Object.assign(t, d, { key, region: report.region, month: report.month });
+    const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng','gx','gy'].includes(k) ? null : '');
+    Object.assign(t, d, { key, region: report.region, month: report.month });
+    // Recompute position from the stored address grid so placement fixes apply without re-importing
+    if (t.gx != null && t.gy != null) Object.assign(t, ArbParser.gridToLatLng(t.gx, t.gy));
+    return t;
   }
 
   // Which report is shown for each region
