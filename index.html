@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CDOT Arborist Reports</title>
+<meta name="theme-color" content="#1e3a2b">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="parser.js"></script>
+<style>
+  :root {
+    --ink: #17201b; --ink-2: #4f5a53; --ink-3: #7c867f;
+    --bg: #f4f5f2; --card: #ffffff; --line: #e2e5df; --line-2: #eef0ec;
+    --brand: #1e3a2b; --brand-2: #2f5a41; --brand-soft: #e7efe9;
+    --tree: #2a78d6; --issue: #eb6834; --vacant: #8b918c;
+    --bar: #2a78d6;
+    --danger: #b42318;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(20,30,25,.06), 0 4px 16px rgba(20,30,25,.06);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; font-size: 14px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+
+  /* Top bar */
+  header.top {
+    background: var(--brand); color: #fff; display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap;
+  }
+  .brand { display: flex; flex-direction: column; line-height: 1.15; margin-right: 8px; }
+  .brand b { font-size: 16px; letter-spacing: .2px; }
+  .brand span { font-size: 12px; opacity: .75; }
+  .regions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid rgba(255,255,255,.28); background: transparent; color: #fff;
+    border-radius: 999px; padding: 5px 11px; font-size: 13px; display: inline-flex; gap: 6px; align-items: baseline;
+  }
+  .chip small { opacity: .7; font-size: 11px; }
+  .chip[aria-pressed="true"] { background: #fff; color: var(--brand); border-color: #fff; }
+  .chip.empty { opacity: .55; }
+  .top .spacer { flex: 1; }
+  .top select, .top .btn-ghost {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.28); color: #fff;
+    border-radius: 8px; padding: 6px 10px; font-size: 13px;
+  }
+  .top select option { color: var(--ink); }
+  .btn { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 12px; font-size: 13px; }
+  .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .btn.primary:disabled { opacity: .5; cursor: default; }
+  .btn.small { padding: 4px 9px; font-size: 12px; }
+  .btn-light { background: #fff; color: var(--brand); border: 0; border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 600; }
+
+  .banner { background: #fff7e6; color: #6b4b00; border-bottom: 1px solid #f3dfb0; padding: 7px 16px; font-size: 13px; }
+
+  /* Layout */
+  .layout { flex: 1; display: grid; grid-template-columns: 270px 1fr; min-height: 0; }
+  aside.filters { background: var(--card); border-right: 1px solid var(--line); overflow: auto; padding: 14px; }
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .tabs { display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid var(--line); background: var(--card); align-items: flex-end; }
+  .tab { border: 0; background: transparent; padding: 9px 12px; border-bottom: 2px solid transparent; color: var(--ink-2); font-weight: 500; }
+  .tab[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); }
+  .tabs .count { margin-left: auto; color: var(--ink-3); font-size: 12px; padding-bottom: 10px; }
+  .view { flex: 1; min-height: 0; overflow: auto; }
+  #view-map { position: relative; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+
+  .f-group { margin-bottom: 14px; }
+  .f-group label.f { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin-bottom: 5px; }
+  .f-group input[type=search], .f-group select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; }
+  .checks label { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 13px; }
+  .checks .n { margin-left: auto; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .f-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Legend on the map */
+  .legend { position: absolute; z-index: 500; left: 12px; bottom: 12px; background: rgba(255,255,255,.95); border-radius: 8px; padding: 8px 10px; box-shadow: var(--shadow); font-size: 12px; }
+  .legend div { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot.tree { background: var(--tree); }
+  .dot.issue { background: var(--issue); }
+  .dot.vacant { border: 2px solid var(--vacant); background: #fff; }
+  .legend .note { color: var(--ink-3); margin-top: 3px; max-width: 220px; }
+
+  /* Table */
+  table.grid { width: 100%; border-collapse: collapse; background: var(--card); font-size: 13px; }
+  table.grid th { position: sticky; top: 0; background: #fafbf9; text-align: left; font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--line); padding: 8px 10px; white-space: nowrap; cursor: pointer; user-select: none; z-index: 1; }
+  table.grid th .arr { color: var(--ink-3); font-size: 10px; }
+  table.grid td { border-bottom: 1px solid var(--line-2); padding: 7px 10px; vertical-align: top; }
+  table.grid tbody tr { cursor: pointer; }
+  table.grid tbody tr:hover { background: #f6f9f7; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #fdeee6; color: #8a3311; margin: 1px 3px 1px 0; white-space: nowrap; }
+  .tag.flag { background: #fff1c2; color: #6b4b00; }
+  .tag.muted { background: #eef0ec; color: var(--ink-2); }
+  .sci { font-style: italic; }
+  .more { padding: 14px; text-align: center; }
+
+  /* Sites */
+  .pad { padding: 16px; }
+  .site-region { margin: 4px 0 18px; }
+  .site-region h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 0 0 8px; font-weight: 600; }
+  .site-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .site-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 11px 13px; text-align: left; }
+  .site-card:hover { border-color: var(--brand-2); }
+  .site-card b { display: block; font-size: 14px; margin-bottom: 2px; }
+  .site-card .meta { color: var(--ink-3); font-size: 12px; margin-bottom: 7px; }
+  .site-card .nums { display: flex; gap: 12px; font-size: 12px; color: var(--ink-2); }
+  .site-card .nums b { display: inline; font-size: 13px; color: var(--ink); }
+
+  /* Summary */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.3px; }
+  .tile .l { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .card h4 { margin: 0 0 2px; font-size: 14px; }
+  .card .sub { color: var(--ink-3); font-size: 12px; margin-bottom: 10px; }
+  .bars { display: grid; grid-template-columns: minmax(90px, 38%) 1fr auto; gap: 5px 10px; align-items: center; font-size: 12.5px; }
+  .bars .lab { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bars .track { height: 12px; position: relative; }
+  .bars .fill { height: 12px; background: var(--bar); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .bars .val { font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; }
+  .bars .row-hit { display: contents; }
+  .bars .row-hit:hover .lab { color: var(--ink); }
+  table.mini { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.mini th, table.mini td { padding: 6px 8px; border-bottom: 1px solid var(--line-2); text-align: right; font-variant-numeric: tabular-nums; }
+  table.mini th:first-child, table.mini td:first-child { text-align: left; }
+  table.mini th { color: var(--ink-3); font-weight: 600; font-size: 12px; }
+
+  /* Drawer */
+  .drawer { position: fixed; z-index: 1000; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--card); box-shadow: -8px 0 30px rgba(0,0,0,.12); display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease; }
+  .drawer.open { transform: none; }
+  .drawer header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; padding-top: max(14px, env(safe-area-inset-top)); }
+  .drawer header h2 { font-size: 17px; margin: 0 0 3px; }
+  .drawer header .where { color: var(--ink-2); font-size: 13px; }
+  .drawer .x { margin-left: auto; border: 0; background: transparent; font-size: 22px; line-height: 1; color: var(--ink-3); padding: 2px 6px; }
+  .drawer .body { overflow: auto; padding: 14px 16px 30px; }
+  dl.kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0 0 16px; font-size: 13px; }
+  dl.kv dt { color: var(--ink-3); }
+  dl.kv dd { margin: 0; }
+  .sec { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 16px 0 8px; }
+  .hist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .hist td, .hist th { border-bottom: 1px solid var(--line-2); padding: 5px 6px; text-align: left; }
+  .hist th { color: var(--ink-3); font-weight: 600; }
+  .note { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+  .note .by { color: var(--ink-3); font-size: 11.5px; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
+  .note.done { opacity: .6; }
+  textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 64px; resize: vertical; }
+  .scrim { position: fixed; inset: 0; background: rgba(10,20,15,.35); z-index: 900; }
+
+  /* Modal */
+  .modal-wrap { position: fixed; inset: 0; background: rgba(10,20,15,.45); z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal { background: var(--card); border-radius: 14px; width: min(640px, 100%); max-height: 90vh; overflow: auto; box-shadow: var(--shadow); }
+  .modal header { padding: 16px 18px 6px; display: flex; align-items: center; }
+  .modal header h2 { margin: 0; font-size: 17px; }
+  .modal .body { padding: 8px 18px 18px; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; color: var(--ink-2); background: #fafbf9; }
+  .drop.over { border-color: var(--brand-2); background: var(--brand-soft); }
+  .file-row { display: grid; grid-template-columns: 1fr 130px 140px; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; }
+  .file-row .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-row select, .file-row input { border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; width: 100%; background: #fff; }
+  .file-row .res { grid-column: 1 / -1; font-size: 12px; color: var(--ink-2); }
+  .file-row .res.err { color: var(--danger); }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  .muted { color: var(--ink-3); }
+
+  /* Login */
+  .login { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .login form { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; width: min(360px, 100%); box-shadow: var(--shadow); }
+  .login h2 { margin: 0 0 4px; font-size: 18px; }
+  .login p { margin: 0 0 16px; color: var(--ink-2); font-size: 13px; }
+  .login input { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; margin-bottom: 10px; }
+  .login .err { color: var(--danger); font-size: 13px; min-height: 18px; }
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-2); }
+  .empty-state b { display: block; font-size: 16px; color: var(--ink); margin-bottom: 6px; }
+
+  .toast { position: fixed; z-index: 1200; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 9px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); }
+
+  .only-mobile { display: none; }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+    aside.filters { position: fixed; z-index: 950; top: 0; left: 0; bottom: 0; width: min(320px, 88%); transform: translateX(-105%); transition: transform .2s ease; box-shadow: 8px 0 30px rgba(0,0,0,.12); padding-top: max(14px, env(safe-area-inset-top)); }
+    aside.filters.open { transform: none; }
+    .only-mobile { display: inline-flex; }
+    .brand span { display: none; }
+    header.top { gap: 8px; }
+    .regions { order: 5; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .chip small { display: none; }
+    .chip { white-space: nowrap; }
+    .tabs { overflow-x: auto; }
+    .count-reps { display: none; }
+    .tabs .count { white-space: nowrap; }
+    .file-row { grid-template-columns: 1fr 1fr; }
+    .file-row .fn { grid-column: 1 / -1; }
+    dl.kv { grid-template-columns: 110px 1fr; }
+    .drawer { top: auto; height: 82vh; width: 100%; border-radius: 16px 16px 0 0; transform: translateY(105%); }
+    .drawer.open { transform: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <button class="btn-ghost only-mobile" id="btn-filters" aria-label="Filters">☰ Filters</button>
+  <div class="brand"><b>Arborist Reports</b><span>CDOT Landscape · tree inspections</span></div>
+  <div class="regions" id="regions"></div>
+  <div class="spacer"></div>
+  <select id="month" aria-label="Report month"></select>
+  <button class="btn-light" id="btn-import">Import reports</button>
+  <button class="btn-ghost hidden" id="btn-signout">Sign out</button>
+</header>
+<div class="banner hidden" id="banner"></div>
+
+<div class="login hidden" id="login">
+  <form id="login-form">
+    <h2>Sign in</h2>
+    <p>CDOT arborist report viewer</p>
+    <input type="email" id="login-email" placeholder="Email" autocomplete="username" required>
+    <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password" required>
+    <div class="err" id="login-err"></div>
+    <button class="btn primary" style="width:100%;padding:10px" type="submit">Sign in</button>
+    <p style="margin:14px 0 0;text-align:center"><a href="#" id="login-local">Open a workbook on this device instead</a></p>
+  </form>
+</div>
+
+<div class="layout hidden" id="app">
+  <aside class="filters" id="filters">
+    <div class="f-group">
+      <label class="f" for="f-q">Search</label>
+      <input type="search" id="f-q" placeholder="Address, species, comment, ID…">
+    </div>
+    <div class="f-group">
+      <label class="f" for="f-site">Site</label>
+      <select id="f-site"></select>
+    </div>
+    <div class="f-group">
+      <label class="f" for="f-genus">Genus</label>
+      <select id="f-genus"></select>
+    </div>
+    <div class="f-group">
+      <label class="f">Status</label>
+      <div class="checks" id="f-status"></div>
+    </div>
+    <div class="f-group">
+      <label class="f">Condition noted</label>
+      <div class="checks" id="f-issue"></div>
+    </div>
+    <div class="f-group">
+      <label class="f" for="f-pruned">Last pruned</label>
+      <select id="f-pruned"></select>
+    </div>
+    <div class="f-group">
+      <label class="f" for="f-size">Prune size class</label>
+      <select id="f-size"></select>
+    </div>
+    <div class="f-actions">
+      <button class="btn small" id="f-clear">Clear filters</button>
+      <button class="btn small" id="f-csv">Export CSV</button>
+      <button class="btn small only-mobile" id="f-done">Done</button>
+    </div>
+  </aside>
+  <main>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-view="map">Map</button>
+      <button class="tab" role="tab" data-view="table">Table</button>
+      <button class="tab" role="tab" data-view="sites">Sites</button>
+      <button class="tab" role="tab" data-view="summary">Summary</button>
+      <span class="count" id="count"></span>
+    </div>
+    <section class="view" id="view-map">
+      <div id="map"></div>
+      <div class="legend">
+        <div><span class="dot tree"></span>Tree</div>
+        <div><span class="dot issue"></span>Tree with condition noted</div>
+        <div><span class="dot vacant"></span>Vacant / removed</div>
+        <div class="note">Positions are approximate, placed from the Chicago address grid.</div>
+      </div>
+    </section>
+    <section class="view hidden" id="view-table"></section>
+    <section class="view hidden pad" id="view-sites"></section>
+    <section class="view hidden pad" id="view-summary"></section>
+  </main>
+</div>
+
+<div class="scrim hidden" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <header>
+    <div><h2 id="d-title"></h2><div class="where" id="d-where"></div></div>
+    <button class="x" id="d-close" aria-label="Close">×</button>
+  </header>
+  <div class="body" id="d-body"></div>
+</aside>
+
+<div class="modal-wrap hidden" id="import">
+  <div class="modal" role="dialog" aria-labelledby="imp-title">
+    <header><h2 id="imp-title">Import arborist reports</h2><button class="x btn small" style="margin-left:auto" id="imp-close">Close</button></header>
+    <div class="body">
+      <label class="drop" id="drop">
+        <input type="file" id="imp-file" multiple accept=".xls,.xlsx,.xlsm" class="hidden">
+        <div><b>Choose workbooks</b> or drop them here</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">.xls, .xlsx or .xlsm · one tab per site, like the monthly arborist reports</div>
+      </label>
+      <div id="imp-files"></div>
+      <div class="actions">
+        <span class="muted" id="imp-msg" style="margin-right:auto;font-size:12px;align-self:center"></span>
+        <button class="btn" id="imp-local" disabled>View on this device only</button>
+        <button class="btn primary" id="imp-save" disabled>Save to database</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const CFG = window.APP_CONFIG || {};
+  const REGIONS = CFG.REGIONS;
+  const RMAP = Object.fromEntries(REGIONS.map(r => [r.id, r]));
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtMonth = ym => { if (!ym) return ''; const [y, m] = ym.split('-'); return new Date(+y, +m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); };
+  const nf = n => (n == null ? '' : Number(n).toLocaleString());
+
+  const sb = CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase
+    ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
+
+  const S = {
+    user: null,
+    local: !sb,
+    reports: [],              // {id, region, month, contractor, file_name, tree_count, sites, trees?}
+    month: 'latest',
+    region: 'all',
+    view: 'map',
+    f: { q: '', site: '', genus: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' },
+    sort: { key: 'site', dir: 1 },
+    notes: new Map(),         // tree_key -> [note]
+    tableLimit: 300,
+    filtered: [],
+  };
+
+  const ISSUES = [
+    ['pests', 'Pests / disease', t => !!t.pests],
+    ['deadwood', 'Deadwood 20%+', t => (t.deadwood || 0) >= 20],
+    ['hazard', 'ISA hazard rated', t => t.hazard != null],
+    ['lean', 'Lean', t => !!t.lean],
+    ['wounds', 'Trunk wounds', t => !!t.wounds],
+    ['monitor', '“Monitor” in comments', t => /monitor/i.test(t.comments)],
+    ['followup', 'My follow-ups', t => openFollowUp(t.key)],
+  ];
+  const STATUS = [['tree', 'Trees'], ['vacant', 'Vacant (no tree)'], ['removed', 'Removed'], ['unknown', 'Needs species']];
+  const issueList = t => ISSUES.filter(([k, , fn]) => k !== 'followup' && fn(t)).map(([, l]) => l);
+  const hasIssue = t => t.status === 'tree' && issueList(t).length > 0;
+  const openFollowUp = key => (S.notes.get(key) || []).some(n => n.follow_up && !n.resolved);
+  const speciesName = t => t.genus ? `${t.genus} ${t.species || ''}`.trim() : (t.status === 'tree' || t.status === 'unknown' ? '—' : 'No tree');
+  const addr = t => [t.address, (t.addrDir || '').replace('.', ''), t.street].filter(Boolean).join(' ');
+
+  function toast(msg, ms = 2600) {
+    const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
+    document.body.appendChild(el); setTimeout(() => el.remove(), ms);
+  }
+
+  // ---------- Data access ----------
+  async function loadReports() {
+    if (S.local) return;
+    const { data, error } = await sb.from('reports').select('id, region, month, contractor, file_name, tree_count, sites, warnings, uploaded_at').order('month', { ascending: false });
+    if (error) { toast('Could not load reports: ' + error.message, 5000); return; }
+    S.reports = data.map(r => ({ ...r, trees: null }));
+  }
+  async function loadTrees(report) {
+    if (report.trees) return report.trees;
+    const out = []; const page = 1000;
+    for (let from = 0; ; from += page) {
+      const { data, error } = await sb.from('report_trees').select('tree_key, data').eq('report_id', report.id).range(from, from + page - 1);
+      if (error) throw error;
+      for (const r of data) out.push(expand(r.data, report, r.tree_key));
+      if (data.length < page) break;
+    }
+    report.trees = out; return out;
+  }
+  async function loadNotes() {
+    if (S.local) return;
+    const { data, error } = await sb.from('tree_notes').select('*').order('created_at', { ascending: false });
+    if (error) return;
+    S.notes = new Map();
+    for (const n of data) { if (!S.notes.has(n.tree_key)) S.notes.set(n.tree_key, []); S.notes.get(n.tree_key).push(n); }
+  }
+  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng'];
+  function compact(t) { const o = {}; for (const [k, v] of Object.entries(t)) if (v !== '' && v != null && k !== 'region' && k !== 'key') o[k] = v; return o; }
+  function expand(d, report, key) {
+    const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng'].includes(k) ? null : '');
+    return Object.assign(t, d, { key, region: report.region, month: report.month });
+  }
+
+  // Which report is shown for each region
+  function activeReports() {
+    const out = [];
+    for (const r of REGIONS) {
+      if (S.region !== 'all' && S.region !== r.id) continue;
+      const list = S.reports.filter(x => x.region === r.id).sort((a, b) => b.month.localeCompare(a.month));
+      const pick = S.month === 'latest' ? list[0] : list.find(x => x.month === S.month);
+      if (pick) out.push(pick);
+    }
+    return out;
+  }
+  async function currentTrees() {
+    const reps = activeReports();
+    if (!S.local) await Promise.all(reps.map(loadTrees));
+    return reps.flatMap(r => r.trees || []);
+  }
+
+  // ---------- Header ----------
+  function renderRegions() {
+    const has = id => S.reports.some(r => r.region === id);
+    const el = $('#regions');
+    el.innerHTML = [`<button class="chip" data-r="all" aria-pressed="${S.region === 'all'}">All regions</button>`]
+      .concat(REGIONS.map(r => `<button class="chip ${has(r.id) ? '' : 'empty'}" data-r="${r.id}" aria-pressed="${S.region === r.id}" title="${esc(r.contractor)}${has(r.id) ? '' : ' · no report yet'}">${esc(r.name)} <small>${esc(r.contractor)}</small></button>`)).join('');
+    el.querySelectorAll('.chip').forEach(b => b.onclick = () => { S.region = b.dataset.r; S.f.site = ''; renderRegions(); refresh(true); });
+    const months = [...new Set(S.reports.map(r => r.month))].sort().reverse();
+    if (S.month !== 'latest' && !months.includes(S.month)) S.month = 'latest';
+    $('#month').innerHTML = `<option value="latest">Latest report</option>` + months.map(m => `<option value="${m}" ${S.month === m ? 'selected' : ''}>${fmtMonth(m)}</option>`).join('');
+  }
+  $('#month').onchange = e => { S.month = e.target.value; refresh(true); };
+
+  // ---------- Filters ----------
+  function filterTrees(trees, skip) {
+    const q = S.f.q.trim().toLowerCase();
+    return trees.filter(t => {
+      if (skip !== 'status' && !S.f.status.has(t.status)) return false;
+      if (S.f.site && t.region + '|' + t.site !== S.f.site) return false;
+      if (S.f.genus && t.genus !== S.f.genus) return false;
+      if (S.f.size && t.pruneCat !== S.f.size) return false;
+      if (S.f.pruned) {
+        const y = (t.prunedYM || '').slice(0, 4);
+        if (S.f.pruned === 'never') { if (y || t.status !== 'tree') return false; }
+        else if (!y || y > S.f.pruned) return false;
+      }
+      if (skip !== 'issues' && S.f.issues.size) {
+        for (const k of S.f.issues) { const fn = ISSUES.find(i => i[0] === k)[2]; if (!fn(t)) return false; }
+      }
+      if (q) {
+        const hay = [t.id, t.address, t.addrDir, t.site, t.cross, t.genus, t.species, t.cultivar, t.code, t.pests, t.comments, t.reason, t.wounds].join(' ').toLowerCase();
+        if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderFilters(all) {
+    const sites = [...new Map(all.map(t => [t.region + '|' + t.site, t])).values()].sort((a, b) => a.region.localeCompare(b.region) || a.site.localeCompare(b.site));
+    $('#f-site').innerHTML = `<option value="">All sites (${sites.length})</option>` + REGIONS.map(r => {
+      const s = sites.filter(x => x.region === r.id); if (!s.length) return '';
+      return `<optgroup label="${esc(r.name)}">` + s.map(x => `<option value="${esc(x.region + '|' + x.site)}" ${S.f.site === x.region + '|' + x.site ? 'selected' : ''}>${esc(x.site)}</option>`).join('') + '</optgroup>';
+    }).join('');
+    const genera = {}; all.forEach(t => { if (t.genus) genera[t.genus] = (genera[t.genus] || 0) + 1; });
+    $('#f-genus').innerHTML = `<option value="">All genera</option>` + Object.entries(genera).sort((a, b) => a[0].localeCompare(b[0])).map(([g, n]) => `<option ${S.f.genus === g ? 'selected' : ''} value="${esc(g)}">${esc(g)} (${n})</option>`).join('');
+
+    const st = filterTrees(all, 'status');
+    $('#f-status').innerHTML = STATUS.map(([k, l]) => {
+      const n = st.filter(t => t.status === k).length; if (!n && k === 'unknown') return '';
+      return `<label><input type="checkbox" data-s="${k}" ${S.f.status.has(k) ? 'checked' : ''}> ${l}<span class="n">${nf(n)}</span></label>`;
+    }).join('');
+    $('#f-status').querySelectorAll('input').forEach(i => i.onchange = () => { i.checked ? S.f.status.add(i.dataset.s) : S.f.status.delete(i.dataset.s); refresh(); });
+
+    const iss = filterTrees(all, 'issues');
+    $('#f-issue').innerHTML = ISSUES.map(([k, l, fn]) => {
+      if (k === 'followup' && S.local) return '';
+      const n = iss.filter(fn).length;
+      return `<label><input type="checkbox" data-i="${k}" ${S.f.issues.has(k) ? 'checked' : ''}> ${l}<span class="n">${nf(n)}</span></label>`;
+    }).join('');
+    $('#f-issue').querySelectorAll('input').forEach(i => i.onchange = () => { i.checked ? S.f.issues.add(i.dataset.i) : S.f.issues.delete(i.dataset.i); refresh(); });
+
+    const years = [...new Set(all.map(t => (t.prunedYM || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+    $('#f-pruned').innerHTML = `<option value="">Any</option><option value="never" ${S.f.pruned === 'never' ? 'selected' : ''}>No pruning date recorded</option>` +
+      years.map(y => `<option value="${y}" ${S.f.pruned === y ? 'selected' : ''}>${y} or earlier</option>`).join('');
+    const sizes = [...new Set(all.map(t => t.pruneCat).filter(Boolean))].sort((a, b) => parseInt(a.replace('>', '')) - parseInt(b.replace('>', '')));
+    $('#f-size').innerHTML = `<option value="">Any</option>` + sizes.map(s => `<option ${S.f.size === s ? 'selected' : ''}>${esc(s)}</option>`).join('');
+  }
+  let qTimer;
+  $('#f-q').oninput = e => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = e.target.value; refresh(); }, 200); };
+  $('#f-site').onchange = e => { S.f.site = e.target.value; refresh(true); };
+  $('#f-genus').onchange = e => { S.f.genus = e.target.value; refresh(); };
+  $('#f-pruned').onchange = e => { S.f.pruned = e.target.value; refresh(); };
+  $('#f-size').onchange = e => { S.f.size = e.target.value; refresh(); };
+  $('#f-clear').onclick = () => { S.f = { q: '', site: '', genus: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' }; $('#f-q').value = ''; refresh(true); };
+  $('#f-csv').onclick = exportCsv;
+  $('#btn-filters').onclick = () => $('#filters').classList.add('open');
+  $('#f-done').onclick = () => $('#filters').classList.remove('open');
+
+  // ---------- Views ----------
+  document.querySelectorAll('.tab').forEach(b => b.onclick = () => setView(b.dataset.view));
+  function setView(v) {
+    S.view = v;
+    document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.view === v));
+    ['map', 'table', 'sites', 'summary'].forEach(k => $('#view-' + k).classList.toggle('hidden', k !== v));
+    if (v === 'map' && map) setTimeout(() => map.invalidateSize(), 0);
+    renderView();
+  }
+
+  let allTrees = [];
+  let refreshing = 0;
+  async function refresh(fit) {
+    const my = ++refreshing;
+    $('#count').textContent = 'Loading…';
+    let trees;
+    try { trees = await currentTrees(); } catch (e) { toast('Could not load trees: ' + e.message, 5000); trees = []; }
+    if (my !== refreshing) return;
+    allTrees = trees;
+    S.filtered = filterTrees(trees);
+    S.tableLimit = 300;
+    renderFilters(trees);
+    const reps = activeReports();
+    $('#count').innerHTML = reps.length
+      ? `${nf(S.filtered.length)} of ${nf(trees.length)}<span class="count-reps"> rows · ${esc(reps.map(r => `${RMAP[r.region].name} ${fmtMonth(r.month)}`).join(', '))}</span>`
+      : '';
+    renderView(fit);
+  }
+  function renderView(fit) {
+    if (!activeReports().length) {
+      const msg = `<div class="empty-state"><b>No reports ${S.region === 'all' ? 'yet' : 'for ' + esc(RMAP[S.region].name) + (S.month === 'latest' ? '' : ' in ' + fmtMonth(S.month))}</b>Use <b style="display:inline">Import reports</b> to add the monthly arborist workbooks.</div>`;
+      ['table', 'sites', 'summary'].forEach(k => $('#view-' + k).innerHTML = msg);
+      if (map) markers.clearLayers();
+      return;
+    }
+    if (S.view === 'map') renderMap(fit);
+    if (S.view === 'table') renderTable();
+    if (S.view === 'sites') renderSites();
+    if (S.view === 'summary') renderSummary();
+  }
+
+  // Map
+  let map, markers, renderer;
+  function initMap() {
+    if (map || !window.L) return;
+    map = L.map('map', { preferCanvas: true, zoomControl: true }).setView([41.86, -87.68], 11);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20, subdomains: 'abcd',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    }).addTo(map);
+    renderer = L.canvas({ padding: 0.5, tolerance: 6 });
+    markers = L.layerGroup().addTo(map);
+  }
+  function renderMap(fit) {
+    initMap(); if (!map) return;
+    markers.clearLayers();
+    const pts = [];
+    for (const t of S.filtered) {
+      if (t.lat == null) continue;
+      const vacant = t.status === 'vacant' || t.status === 'removed';
+      const color = vacant ? getCss('--vacant') : hasIssue(t) ? getCss('--issue') : getCss('--tree');
+      const m = L.circleMarker([t.lat, t.lng], {
+        renderer, radius: vacant ? 4 : 5.5, weight: vacant ? 2 : 1.5,
+        color: vacant ? color : '#ffffff', fillColor: vacant ? '#ffffff' : color, fillOpacity: 1, opacity: 1,
+      });
+      m.bindTooltip(`<b>${esc(speciesName(t))}</b>${t.dbh ? ' · ' + t.dbh + '"' : ''}<br>${esc(addr(t))}`, { direction: 'top', offset: [0, -4] });
+      m.on('click', () => openTree(t));
+      markers.addLayer(m); pts.push([t.lat, t.lng]);
+    }
+    if ((fit || !renderMap.fitted) && pts.length) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 17 }); renderMap.fitted = true; }
+  }
+  const cssCache = {};
+  const getCss = v => cssCache[v] || (cssCache[v] = getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+
+  // Table
+  const COLS = [
+    ['region', 'Region', t => RMAP[t.region].name],
+    ['site', 'Site', t => t.site],
+    ['pos', 'Planter · No.', t => [t.planter && 'P' + t.planter, t.treeNo && '#' + t.treeNo].filter(Boolean).join(' '), t => (parseFloat(t.planter) || 0) * 1000 + (parseFloat(t.treeNo) || 0)],
+    ['address', 'Address', t => addr(t), t => parseFloat(t.address) || 0],
+    ['species', 'Species', t => speciesName(t)],
+    ['dbh', 'DBH (in)', t => t.dbh ?? '', t => t.dbh ?? -1],
+    ['pruned', 'Last pruned', t => t.pruned, t => t.prunedYM || ''],
+    ['issues', 'Condition / notes', null, t => issueList(t).length],
+    ['id', 'ID', t => t.id, t => parseFloat(t.id) || 0],
+  ];
+  function sorted(list) {
+    const col = COLS.find(c => c[0] === S.sort.key);
+    const kf = col[3] || col[2];
+    return [...list].sort((a, b) => {
+      const x = kf(a), y = kf(b);
+      const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+      return c * S.sort.dir || a.site.localeCompare(b.site) || ((parseFloat(a.planter) || 0) - (parseFloat(b.planter) || 0)) || ((parseFloat(a.treeNo) || 0) - (parseFloat(b.treeNo) || 0));
+    });
+  }
+  function renderTable() {
+    const rows = sorted(S.filtered);
+    const shown = rows.slice(0, S.tableLimit);
+    const th = COLS.map(([k, l]) => `<th data-k="${k}">${l} <span class="arr">${S.sort.key === k ? (S.sort.dir > 0 ? '▲' : '▼') : ''}</span></th>`).join('');
+    const body = shown.map((t, i) => {
+      const iss = issueList(t).map(x => `<span class="tag">${esc(x)}</span>`).join('');
+      const fu = openFollowUp(t.key) ? '<span class="tag flag">Follow-up</span>' : '';
+      const st = t.status === 'tree' ? '' : `<span class="tag muted">${t.status === 'vacant' ? 'Vacant' : t.status === 'removed' ? 'Removed' + (t.removed ? ' ' + esc(t.removed) : '') : 'Needs species'}</span>`;
+      const sp = t.genus ? `<span class="sci">${esc(speciesName(t))}</span>${t.cultivar ? ' ‘' + esc(t.cultivar) + '’' : ''}` : esc(speciesName(t));
+      return `<tr data-i="${i}"><td>${esc(RMAP[t.region].name)}</td><td>${esc(t.site)}</td><td>${esc(COLS[2][2](t))}</td><td>${esc(addr(t))}</td><td>${sp}</td><td class="num">${t.dbh ?? ''}</td><td>${esc(t.pruned)}</td><td>${st}${fu}${iss}${t.comments ? '<div class="muted" style="font-size:12px">' + esc(t.comments) + '</div>' : ''}</td><td class="num muted">${esc(t.id)}</td></tr>`;
+    }).join('');
+    $('#view-table').innerHTML = `<table class="grid"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>` +
+      (rows.length > shown.length ? `<div class="more"><button class="btn" id="more">Show more (${nf(rows.length - shown.length)} left)</button></div>` : '') +
+      (!rows.length ? '<div class="empty-state"><b>No rows match these filters</b></div>' : '');
+    $('#view-table').querySelectorAll('th').forEach(h => h.onclick = () => { const k = h.dataset.k; S.sort = { key: k, dir: S.sort.key === k ? -S.sort.dir : 1 }; renderTable(); });
+    $('#view-table').querySelectorAll('tbody tr').forEach(r => r.onclick = () => openTree(shown[+r.dataset.i]));
+    const more = $('#more'); if (more) more.onclick = () => { S.tableLimit += 500; renderTable(); };
+  }
+
+  // Sites
+  function renderSites() {
+    const groups = new Map();
+    for (const t of S.filtered) { const k = t.region + '|' + t.site; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+    const meta = new Map(activeReports().flatMap(r => (r.sites || []).map(s => [r.region + '|' + s.site, s])));
+    let html = '';
+    for (const r of REGIONS) {
+      const keys = [...groups.keys()].filter(k => k.startsWith(r.id + '|')).sort();
+      if (!keys.length) continue;
+      html += `<div class="site-region"><h3>${esc(r.name)} · ${esc(r.contractor)}</h3><div class="site-list">` + keys.map(k => {
+        const ts = groups.get(k), m = meta.get(k) || {};
+        const trees = ts.filter(t => t.status === 'tree').length, vac = ts.filter(t => t.status !== 'tree' && t.status !== 'unknown').length, iss = ts.filter(hasIssue).length;
+        return `<button class="site-card" data-k="${esc(k)}"><b>${esc(k.split('|')[1])}</b><div class="meta">${esc([m.siteType, m.inspection && 'Inspected ' + m.inspection.toLowerCase()].filter(Boolean).join(' · '))}</div>
+          <div class="nums"><span><b>${trees}</b> trees</span><span><b>${vac}</b> vacant/removed</span><span><b>${iss}</b> with conditions</span></div></button>`;
+      }).join('') + '</div></div>';
+    }
+    $('#view-sites').innerHTML = html || '<div class="empty-state"><b>No sites match these filters</b></div>';
+    $('#view-sites').querySelectorAll('.site-card').forEach(c => c.onclick = () => { S.f.site = c.dataset.k; setView('map'); refresh(true); });
+  }
+
+  // Summary
+  function bars(entries, unit = '') {
+    const max = Math.max(1, ...entries.map(e => e[1]));
+    return `<div class="bars">` + entries.map(([l, v, title]) => `<div class="row-hit" title="${esc((title || l) + ': ' + nf(v) + unit)}"><div class="lab">${esc(l)}</div><div class="track"><div class="fill" style="width:${(v / max) * 100}%"></div></div><div class="val">${nf(v)}</div></div>`).join('') + `</div>`;
+  }
+  const tally = (list, f) => { const m = new Map(); for (const t of list) for (const v of [].concat(f(t) || [])) if (v) m.set(v, (m.get(v) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const normPest = s => String(s).split(/[,;/&]| and /i).map(x => x.replace(/\(.*?\)|in past|\b\d+\b|[-–]\s*\d+|\?/gi, '').trim()).filter(x => x.length > 1)
+    .map(x => { const l = x.toLowerCase(); return l === 'elb' || l === 'elm leaf beetle' ? 'Elm leaf beetle' : l === 'eab' ? 'EAB' : l === 'atgm' ? 'ATGM' : l === 'scab' || l === 'rust' ? 'Scab/rust' : x[0].toUpperCase() + x.slice(1).toLowerCase(); });
+  function renderSummary() {
+    const L = S.filtered, trees = L.filter(t => t.status === 'tree');
+    const vac = L.filter(t => t.status === 'vacant').length, rem = L.filter(t => t.status === 'removed').length;
+    const iss = trees.filter(hasIssue).length;
+    const pruned = trees.filter(t => t.prunedYM);
+    const oldest = pruned.length ? Math.min(...pruned.map(t => +t.prunedYM.slice(0, 4))) : null;
+    const notPrunedSince = trees.filter(t => !t.prunedYM || +t.prunedYM.slice(0, 4) <= 2018).length;
+    const dbh = trees.map(t => t.dbh).filter(Boolean).sort((a, b) => a - b);
+    const med = dbh.length ? dbh[Math.floor(dbh.length / 2)] : null;
+
+    const byRegion = REGIONS.map(r => {
+      const x = L.filter(t => t.region === r.id); if (!x.length) return '';
+      const tr = x.filter(t => t.status === 'tree');
+      return `<tr><td>${esc(r.name)}</td><td>${nf(new Set(x.map(t => t.site)).size)}</td><td>${nf(tr.length)}</td><td>${nf(x.filter(t => t.status === 'vacant' || t.status === 'removed').length)}</td><td>${nf(tr.filter(hasIssue).length)}</td></tr>`;
+    }).join('');
+
+    const genera = tally(trees, t => t.genus);
+    const top = genera.slice(0, 10); const otherG = genera.slice(10).reduce((a, e) => a + e[1], 0);
+    if (otherG) top.push([`Other (${genera.length - 10} genera)`, otherG]);
+    const pests = tally(trees, t => t.pests ? normPest(t.pests) : null).slice(0, 10);
+    const years = tally(trees, t => (t.prunedYM || '').slice(0, 4) || 'No date').sort((a, b) => a[0] === 'No date' ? 1 : b[0] === 'No date' ? -1 : b[0].localeCompare(a[0]));
+    const sizeOrder = s => parseInt(String(s).replace('>', '')) + (String(s).startsWith('>') ? 0.5 : 0);
+    const sizes = tally(trees, t => t.pruneCat).sort((a, b) => sizeOrder(a[0]) - sizeOrder(b[0]));
+    const reasons = tally(L.filter(t => t.status === 'removed'), t => t.reason && t.reason !== '?' ? t.reason.replace(/vehic?el/i, 'Vehicle').replace(/hit by car/i, 'Vehicle').replace(/declin\s*e/i, 'Decline').replace(/^\w/, c => c.toUpperCase()) : 'Not recorded');
+    const topShare = genera[0] ? Math.round(genera[0][1] / trees.length * 100) : 0;
+
+    $('#view-summary').innerHTML = `
+      <div class="tiles">
+        <div class="tile"><div class="v">${nf(trees.length)}</div><div class="l">Trees</div></div>
+        <div class="tile"><div class="v">${nf(vac + rem)}</div><div class="l">Vacant or removed spots</div></div>
+        <div class="tile"><div class="v">${nf(iss)}</div><div class="l">Trees with a condition noted</div></div>
+        <div class="tile"><div class="v">${nf(notPrunedSince)}</div><div class="l">Not pruned since 2018 (or no date)</div></div>
+        <div class="tile"><div class="v">${med ?? '—'}${med ? '″' : ''}</div><div class="l">Median DBH</div></div>
+      </div>
+      <div class="cards">
+        <div class="card"><h4>By region</h4><div class="sub">Current filters</div>
+          <table class="mini"><thead><tr><th>Region</th><th>Sites</th><th>Trees</th><th>Vacant / removed</th><th>Conditions</th></tr></thead><tbody>${byRegion}</tbody></table></div>
+        <div class="card"><h4>Top genera</h4><div class="sub">${genera[0] ? esc(genera[0][0]) + ' is ' + topShare + '% of trees' : ''}</div>${bars(top)}</div>
+        <div class="card"><h4>Pests and disease noted</h4><div class="sub">Trees per pest or disease (a tree can have several)</div>${pests.length ? bars(pests) : '<div class="muted">None noted</div>'}</div>
+        <div class="card"><h4>Last pruning year</h4><div class="sub">${oldest ? 'Oldest recorded: ' + oldest : ''}</div>${bars(years)}</div>
+        <div class="card"><h4>Prune size class</h4><div class="sub">Trees per contract size class</div>${sizes.length ? bars(sizes) : '<div class="muted">Not recorded</div>'}</div>
+        <div class="card"><h4>Removal reasons</h4><div class="sub">Spots marked removed</div>${reasons.length ? bars(reasons.slice(0, 10)) : '<div class="muted">None</div>'}</div>
+      </div>`;
+  }
+
+  // ---------- Tree drawer ----------
+  let openKey = null;
+  async function openTree(t) {
+    openKey = t.key;
+    $('#d-title').textContent = t.genus ? speciesName(t) + (t.cultivar ? ` ‘${t.cultivar}’` : '') : speciesName(t);
+    $('#d-where').textContent = `${addr(t)} · ${t.site} · ${RMAP[t.region].name}`;
+    const row = (l, v) => (v === '' || v == null ? '' : `<dt>${l}</dt><dd>${v}</dd>`);
+    const iss = issueList(t);
+    $('#d-body').innerHTML = `
+      ${iss.length ? '<div style="margin-bottom:12px">' + iss.map(x => `<span class="tag">${esc(x)}</span>`).join('') + '</div>' : ''}
+      <dl class="kv">
+        ${row('Status', t.status === 'tree' ? 'Tree' : t.status === 'vacant' ? 'Vacant (no tree)' : t.status === 'removed' ? 'Removed' : 'Needs species')}
+        ${row('Species code', esc(t.code))}
+        ${row('DBH', t.dbh != null ? t.dbh + ' in' : '')}
+        ${row('Planter / tree no.', esc([t.planter && 'Planter ' + t.planter, t.treeNo && 'Tree ' + t.treeNo].filter(Boolean).join(' · ')))}
+        ${row('Side', esc(t.side))}
+        ${row('Cross street', esc(t.cross))}
+        ${row('Last pruned', esc(t.pruned))}
+        ${row('Prune size class', esc(t.pruneCat))}
+        ${row('Removal size class', esc(t.removalCat))}
+        ${row('Deadwood', t.deadwood != null ? t.deadwood + '%' : '')}
+        ${row('Trunk wounds', esc(t.wounds))}
+        ${row('Pests / disease', esc(t.pests))}
+        ${row('Treatment', esc([t.treated, t.product].filter(Boolean).join(' · ')))}
+        ${row('Lean', esc(t.lean))}
+        ${row('ISA hazard (1–4)', t.hazard ?? '')}
+        ${row('Planted', esc(t.planted))}
+        ${row('Removed', esc([t.removed, t.reason].filter(Boolean).join(' · ')))}
+        ${row('Comments', esc(t.comments))}
+        ${row('ID code', esc(t.id))}
+        ${row('Report', esc(fmtMonth(t.month)))}
+      </dl>
+      <div class="sec">History across reports</div><div id="d-hist" class="muted">Loading…</div>
+      ${S.local ? '' : `<div class="sec">Notes</div><div id="d-notes"></div>
+        <textarea id="d-note" placeholder="Add a note (e.g. sent to contractor, checked on site)"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="d-fu"> Flag for follow-up</label><button class="btn primary small" id="d-add" style="margin-left:auto">Add note</button></div>`}
+      ${t.lat != null ? `<div class="sec">Location</div><a href="https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}" target="_blank" rel="noopener">Open approximate spot in Google Maps</a> <span class="muted">· from the address grid</span>` : ''}
+    `;
+    $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').classList.remove('hidden');
+    if (!S.local) { renderNotes(t.key); $('#d-add').onclick = () => addNote(t.key); }
+    renderHistory(t);
+  }
+  function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.add('hidden'); $('#filters').classList.remove('open'); openKey = null; }
+  $('#d-close').onclick = closeDrawer; $('#scrim').onclick = closeDrawer;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrawer(); $('#import').classList.add('hidden'); } });
+
+  async function renderHistory(t) {
+    let rows = [];
+    if (S.local) {
+      rows = S.reports.filter(r => r.region === t.region).map(r => ({ month: r.month, d: (r.trees || []).find(x => x.key === t.key) })).filter(x => x.d);
+    } else {
+      const { data, error } = await sb.from('report_trees').select('data, reports!inner(month, region)').eq('tree_key', t.key);
+      if (error) { $('#d-hist').textContent = 'Could not load history.'; return; }
+      rows = data.map(r => ({ month: r.reports.month, d: r.data }));
+    }
+    if (openKey !== t.key) return;
+    rows.sort((a, b) => b.month.localeCompare(a.month));
+    if (rows.length < 2) { $('#d-hist').textContent = rows.length ? 'Only in this report so far. History builds up as monthly reports are imported.' : ''; return; }
+    $('#d-hist').classList.remove('muted');
+    $('#d-hist').innerHTML = `<table class="hist"><thead><tr><th>Report</th><th>Species</th><th>DBH</th><th>Pruned</th><th>Condition</th></tr></thead><tbody>` +
+      rows.map(({ month, d }) => `<tr><td>${esc(fmtMonth(month))}</td><td>${esc(d.genus ? d.genus + ' ' + (d.species || '') : 'No tree')}</td><td>${d.dbh ?? ''}</td><td>${esc(d.pruned || '')}</td><td>${esc([d.pests, d.deadwood ? d.deadwood + '% deadwood' : '', d.comments].filter(Boolean).join(' · '))}</td></tr>`).join('') + '</tbody></table>';
+  }
+  function renderNotes(key) {
+    const list = S.notes.get(key) || [];
+    $('#d-notes').innerHTML = list.length ? list.map(n => `<div class="note ${n.resolved ? 'done' : ''}">${n.follow_up && !n.resolved ? '<span class="tag flag">Follow-up</span> ' : ''}${esc(n.body)}
+      <div class="by">${esc(n.author_email || '')} · ${new Date(n.created_at).toLocaleDateString()}${n.follow_up ? `<button class="btn small" data-id="${n.id}" style="margin-left:auto">${n.resolved ? 'Reopen' : 'Mark resolved'}</button>` : ''}</div></div>`).join('') : '<div class="muted" style="margin-bottom:8px">No notes yet.</div>';
+    $('#d-notes').querySelectorAll('button[data-id]').forEach(b => b.onclick = async () => {
+      const n = list.find(x => x.id === b.dataset.id);
+      const { error } = await sb.from('tree_notes').update({ resolved: !n.resolved }).eq('id', n.id);
+      if (error) return toast(error.message);
+      n.resolved = !n.resolved; renderNotes(key); if (S.view === 'table') renderTable();
+    });
+  }
+  async function addNote(key) {
+    const body = $('#d-note').value.trim(); if (!body) return;
+    const row = { tree_key: key, body, follow_up: $('#d-fu').checked, author_email: S.user?.email || null };
+    const { data, error } = await sb.from('tree_notes').insert(row).select().single();
+    if (error) return toast('Could not save note: ' + error.message, 4000);
+    if (!S.notes.has(key)) S.notes.set(key, []);
+    S.notes.get(key).unshift(data);
+    $('#d-note').value = ''; $('#d-fu').checked = false; renderNotes(key);
+    if (S.view === 'table') renderTable();
+  }
+
+  // ---------- CSV ----------
+  function exportCsv() {
+    const cols = ['region', 'site', 'planter', 'treeNo', 'address', 'addrDir', 'cross', 'side', 'status', 'genus', 'species', 'cultivar', 'code', 'dbh', 'pruned', 'pruneCat', 'removalCat', 'deadwood', 'wounds', 'pests', 'treated', 'product', 'lean', 'hazard', 'planted', 'removed', 'reason', 'comments', 'id', 'month', 'lat', 'lng'];
+    const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const lines = [cols.join(',')].concat(sorted(S.filtered).map(t => cols.map(c => q(c === 'region' ? RMAP[t.region].name : t[c])).join(',')));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = `arborist-trees-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ---------- Import ----------
+  let pending = []; // {file, region, month, parsed?, error?}
+  $('#btn-import').onclick = () => { pending = []; renderPending(); $('#import').classList.remove('hidden'); };
+  $('#imp-close').onclick = () => $('#import').classList.add('hidden');
+  $('#imp-file').onchange = e => addFiles(e.target.files);
+  const drop = $('#drop');
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+  function addFiles(files) {
+    for (const f of files) pending.push({ file: f, region: ArbParser.guessRegion(f.name), month: ArbParser.guessMonth(f.name), status: 'Reading…' });
+    renderPending();
+    parsePending();
+  }
+  function renderPending() {
+    $('#imp-files').innerHTML = pending.map((p, i) => `<div class="file-row">
+      <div class="fn" title="${esc(p.file.name)}">${esc(p.file.name)}</div>
+      <select data-i="${i}" data-f="region"><option value="">Region…</option>${REGIONS.map(r => `<option value="${r.id}" ${p.region === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select>
+      <input type="month" data-i="${i}" data-f="month" value="${esc(p.month)}">
+      <div class="res ${p.error ? 'err' : ''}">${esc(p.error || p.status || '')}${p.parsed && p.parsed.warnings.length ? `<details style="margin-top:3px"><summary>${p.parsed.warnings.length} note${p.parsed.warnings.length > 1 ? 's' : ''}</summary>${p.parsed.warnings.map(w => '<div>' + esc(w) + '</div>').join('')}</details>` : ''}</div>
+    </div>`).join('');
+    $('#imp-files').querySelectorAll('[data-f]').forEach(el => el.onchange = () => { pending[+el.dataset.i][el.dataset.f] = el.value; checkReady(); });
+    checkReady();
+  }
+  function checkReady() {
+    const ok = pending.length && pending.every(p => p.parsed && p.region && /^\d{4}-\d{2}$/.test(p.month));
+    $('#imp-local').disabled = !ok;
+    $('#imp-save').disabled = !ok || S.local || !S.user;
+    $('#imp-save').title = S.local ? 'Not connected to a database (fill in config.js)' : '';
+    const exists = pending.filter(p => S.reports.some(r => r.region === p.region && r.month === p.month && r.id));
+    $('#imp-msg').textContent = !pending.length ? '' : !ok ? 'Pick a region and month for each file.' : exists.length ? `${exists.length} will replace an existing report for the same region and month.` : '';
+  }
+  async function parsePending() {
+    await waitFor(() => window.XLSX, 10000).catch(() => null);
+    if (!window.XLSX) { pending.forEach(p => { if (!p.parsed) p.error = 'Spreadsheet reader did not load (check your connection).'; }); return renderPending(); }
+    for (const p of pending) {
+      if (p.parsed || p.error) continue;
+      try {
+        const buf = await p.file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array', cellDates: true, cellStyles: false, cellFormula: false });
+        const sheets = {};
+        for (const name of wb.SheetNames) sheets[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: false });
+        p.sheets = sheets;
+        p.parsed = ArbParser.parseWorkbook(sheets, { region: p.region || 'unknown', fileName: p.file.name });
+        const n = p.parsed.sites.reduce((a, s) => a + s.trees.length, 0);
+        p.status = `${p.parsed.sites.length} sites · ${nf(n)} rows`;
+      } catch (e) { p.error = 'Could not read this file: ' + e.message; }
+      renderPending();
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  const waitFor = (fn, ms) => new Promise((res, rej) => { const t0 = Date.now(); (function tick() { if (fn()) return res(); if (Date.now() - t0 > ms) return rej(); setTimeout(tick, 100); })(); });
+
+  // Region keys depend on the region chosen in the dialog, so re-key before saving
+  function finalize(p) {
+    // Region affects map placement fallbacks and tree keys, so parse again if it was changed
+    if (p.parsed.region !== p.region) { p.parsed = ArbParser.parseWorkbook(p.sheets, { region: p.region, fileName: p.file.name }); }
+    const trees = p.parsed.sites.flatMap(s => s.trees.map(t => {
+      return { ...t, region: p.region, month: p.month };
+    }));
+    return {
+      region: p.region, month: p.month, contractor: RMAP[p.region].contractor, file_name: p.file.name,
+      tree_count: trees.length, warnings: p.parsed.warnings,
+      sites: p.parsed.sites.map(s => ({ site: s.site, title: s.title, siteType: s.siteType, inspection: s.inspection, count: s.trees.length })),
+      trees,
+    };
+  }
+  $('#imp-local').onclick = () => {
+    for (const p of pending) {
+      const rep = finalize(p);
+      S.reports = S.reports.filter(r => !(r.region === rep.region && r.month === rep.month));
+      S.reports.push(rep);
+    }
+    $('#import').classList.add('hidden');
+    if (!S.user) enterApp(true);
+    renderRegions(); refresh(true);
+    toast('Showing on this device only — not saved.');
+  };
+  $('#imp-save').onclick = async () => {
+    const btn = $('#imp-save'); btn.disabled = true; $('#imp-local').disabled = true;
+    try {
+      for (const p of pending) {
+        const rep = finalize(p);
+        p.status = 'Saving…'; p.error = ''; renderPending();
+        const old = S.reports.find(r => r.region === rep.region && r.month === rep.month && r.id);
+        if (old) { const { error } = await sb.from('reports').delete().eq('id', old.id); if (error) throw error; }
+        const { trees, ...meta } = rep;
+        const { data: saved, error } = await sb.from('reports').insert(meta).select().single();
+        if (error) throw error;
+        const rows = trees.map(t => ({ report_id: saved.id, tree_key: t.key, site: t.site, data: compact(t) }));
+        for (let i = 0; i < rows.length; i += 500) {
+          const { error: e2 } = await sb.from('report_trees').insert(rows.slice(i, i + 500));
+          if (e2) throw e2;
+          p.status = `Saving… ${nf(Math.min(i + 500, rows.length))} of ${nf(rows.length)}`; renderPending();
+        }
+        p.status = `Saved · ${nf(rows.length)} rows`; renderPending();
+      }
+      await loadReports();
+      $('#import').classList.add('hidden');
+      renderRegions(); refresh(true);
+      toast('Reports saved.');
+    } catch (e) {
+      const p = pending.find(x => /Saving/.test(x.status)); if (p) p.error = 'Save failed: ' + e.message;
+      renderPending();
+    }
+  };
+
+  // ---------- Auth & start ----------
+  function enterApp(localOnly) {
+    if (localOnly) S.local = true;
+    $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+    $('#btn-import').classList.remove('hidden');
+    $('#btn-signout').classList.toggle('hidden', !S.user);
+    if (S.local) {
+      $('#banner').classList.remove('hidden');
+      $('#banner').textContent = sb ? 'Viewing on this device only. Sign in to save reports and notes.' : 'Not connected to a database yet — imported reports are shown on this device only. Add your Supabase details to config.js to save and share them.';
+    } else $('#banner').classList.add('hidden');
+    setView(S.view);
+  }
+  function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); $('#btn-signout').classList.add('hidden'); }
+  $('#login-form').onsubmit = async e => {
+    e.preventDefault(); $('#login-err').textContent = '';
+    const { data, error } = await sb.auth.signInWithPassword({ email: $('#login-email').value.trim(), password: $('#login-pass').value });
+    if (error) { $('#login-err').textContent = error.message; return; }
+    S.user = data.user; await start();
+  };
+  $('#login-local').onclick = e => { e.preventDefault(); enterApp(true); renderRegions(); refresh(true); $('#btn-import').click(); };
+  $('#btn-signout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+  async function start() {
+    S.local = false;
+    enterApp(false);
+    await Promise.all([loadReports(), loadNotes()]);
+    renderRegions(); refresh(true);
+  }
+
+  async function boot() {
+    if (!sb) { enterApp(true); renderRegions(); refresh(true); return; }
+    const { data } = await sb.auth.getSession();
+    if (data.session) { S.user = data.session.user; await start(); } else showLogin();
+  }
+  renderRegions();
+  boot();
+})();
+</script>
+</body>
+</html>

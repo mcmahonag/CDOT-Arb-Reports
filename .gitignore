@@ -1,0 +1,6 @@
+# Keep report workbooks and exports out of this public repo
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+.DS_Store
