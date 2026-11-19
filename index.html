@@ -287,7 +287,7 @@
     <section class="view" id="view-map">
       <div id="map"></div>
       <div class="adjust hidden" id="adjust">
-        <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Aerial (top right) to see the median.</div></div>
+        <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Satellite (top right) to see the median.</div></div>
         <div class="adj-actions"><button class="btn small" id="adj-reset" title="Remove your adjustment and go back to the street centerline">Reset</button><button class="btn small" id="adj-cancel">Cancel</button><button class="btn primary small" id="adj-save">Save location</button></div>
       </div>
       <div class="legend">
@@ -584,15 +584,25 @@
   let map, markers, renderer;
   function initMap() {
     if (map || !window.L) return;
-    map = L.map('map', { preferCanvas: true, zoomControl: true }).setView([41.86, -87.68], 11);
-    // Base maps that need no API key
+    map = L.map('map', { preferCanvas: true, zoomControl: true, maxZoom: 21 }).setView([41.86, -87.68], 11);
+    // Base maps that need no API key. Satellite is Esri World Imagery; the street-label overlay helps find medians.
+    const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
     const streets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
-    const aerial = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+      maxZoom: 21, maxNativeZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
-    L.control.layers({ 'Streets': streets, 'Aerial': aerial }, null, { position: 'topright' }).addTo(map);
+    const imagery = () => L.tileLayer(esri + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 21, maxNativeZoom: 19, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+    });
+    const satellite = imagery();
+    const hybrid = L.layerGroup([imagery(),
+      L.tileLayer(esri + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19, opacity: 0.8 }),
+      L.tileLayer(esri + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19 })]);
+    const bases = { 'Streets': streets, 'Satellite': satellite, 'Satellite + street names': hybrid };
+    let saved = 'Streets';
+    try { saved = localStorage.getItem('arb-basemap') || 'Streets'; } catch (e) {}
+    (bases[saved] || streets).addTo(map);
+    L.control.layers(bases, null, { position: 'topright', collapsed: false }).addTo(map);
+    map.on('baselayerchange', e => { try { localStorage.setItem('arb-basemap', e.name); } catch (err) {} });
     renderer = L.canvas({ padding: 0.5, tolerance: 6 });
     markers = L.layerGroup().addTo(map);
   }
