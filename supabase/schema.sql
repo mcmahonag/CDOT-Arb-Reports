@@ -58,7 +58,9 @@ create table if not exists public.tree_locations (
   lat        double precision not null,
   lng        double precision not null,
   updated_by text,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  source     text,               -- 'gps' or 'map'
+  accuracy_m double precision    -- GPS accuracy in meters
 );
 alter table public.tree_locations enable row level security;
 drop policy if exists "signed in: all" on public.tree_locations;

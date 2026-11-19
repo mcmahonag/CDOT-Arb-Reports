@@ -90,6 +90,13 @@
   .dot.vacant { border: 2px solid var(--vacant); background: #fff; }
   .adjust { position: absolute; z-index: 600; top: 12px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 24px)); background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   .adjust .adj-actions { margin-left: auto; display: flex; gap: 6px; }
+  .locate-btn { position: absolute; z-index: 500; left: 10px; top: 84px; width: 34px; height: 34px; border-radius: 6px; border: 2px solid rgba(0,0,0,.2); background: #fff; font-size: 18px; line-height: 1; color: var(--ink-2); }
+  .locate-btn.on { color: #1a73e8; }
+  .gpsbox { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
+  .gps-acc { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; grid-row: span 2; }
+  .gps-acc.good { color: #0b7a35; } .gps-acc.ok { color: #8a6100; } .gps-acc.poor { color: var(--danger); }
+  .gps-msg { font-size: 13px; color: var(--ink-2); }
+  .gps-actions { display: flex; gap: 6px; justify-content: flex-end; }
   .legend .note { color: var(--ink-3); margin-top: 3px; max-width: 220px; }
 
   /* Table */
@@ -286,6 +293,7 @@
     </div>
     <section class="view" id="view-map">
       <div id="map"></div>
+      <button class="locate-btn hidden" id="btn-locate" title="Show my location" aria-label="Show my location">◎</button>
       <div class="adjust hidden" id="adjust">
         <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Satellite (top right) to see the median.</div></div>
         <div class="adj-actions"><button class="btn small" id="adj-reset" title="Remove your adjustment and go back to the street centerline">Reset</button><button class="btn small" id="adj-cancel">Cancel</button><button class="btn primary small" id="adj-save">Save location</button></div>
@@ -407,7 +415,7 @@
     S.notes = new Map();
     for (const n of data) { if (!S.notes.has(n.tree_key)) S.notes.set(n.tree_key, []); S.notes.get(n.tree_key).push(n); }
   }
-  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy','gNum','gDir','aNum','aDir','dirGuess'];
+  const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy','gNum','gDir','aNum','aDir','dirGuess','seq'];
   function compact(t) { const o = {}; for (const [k, v] of Object.entries(t)) if (v !== '' && v != null && k !== 'region' && k !== 'key') o[k] = v; return o; }
   function expand(d, report, key) {
     const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng','gx','gy','gNum','aNum'].includes(k) ? null : '');
@@ -447,7 +455,8 @@
   }
   function place(t) {
     const fix = S.locs.get(t.key);
-    if (fix) { t.lat = fix.lat; t.lng = fix.lng; t.how = 'manual'; t._pv = -1; return; }
+    if (fix) { t.lat = fix.lat; t.lng = fix.lng; t.how = fix.source === 'gps' ? 'gps' : 'manual'; t.fix = fix; t._pv = -1; return; }
+    t.fix = null;
     if (t._pv === geoVer) return;
     if (t._approx === undefined) t._approx = t.gx != null && t.gy != null ? ArbParser.gridToLatLng(t.gx, t.gy) : (t.lat != null ? { lat: t.lat, lng: t.lng } : null);
     const p = GEO ? ArbGeo.locate(GEO, t, t._approx) : (t._approx ? { ...t._approx, how: 'approx' } : null);
@@ -456,9 +465,9 @@
   }
   async function loadLocs() {
     if (S.local) return;
-    const { data, error } = await sb.from('tree_locations').select('tree_key, lat, lng');
+    const { data, error } = await sb.from('tree_locations').select('*');
     if (error) { console.warn('tree_locations', error.message); S.locsMissing = true; return; }
-    S.locs = new Map(data.map(r => [r.tree_key, { lat: r.lat, lng: r.lng }]));
+    S.locs = new Map(data.map(r => [r.tree_key, { lat: r.lat, lng: r.lng, source: r.source || 'map', accuracy: r.accuracy_m ?? null, by: r.updated_by, at: r.updated_at }]));
   }
 
   // ---------- Header ----------
@@ -605,6 +614,7 @@
     map.on('baselayerchange', e => { try { localStorage.setItem('arb-basemap', e.name); } catch (err) {} });
     renderer = L.canvas({ padding: 0.5, tolerance: 6 });
     markers = L.layerGroup().addTo(map);
+    if (navigator.geolocation) { const b = $('#btn-locate'); b.classList.remove('hidden'); b.onclick = () => toggleLocate(b); }
   }
   function renderMap(fit) {
     initMap(); if (!map) return;
@@ -777,16 +787,20 @@
         <textarea id="d-note" placeholder="Add a note (e.g. sent to contractor, checked on site)"></textarea>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="d-fu"> Flag for follow-up</label><button class="btn primary small" id="d-add" style="margin-left:auto">Add note</button></div>`}
       ${t.lat != null ? `<div class="sec">Location</div>
-        <div style="margin-bottom:8px">${{ manual: 'Adjusted by hand', centerline: 'On the street centerline at this address', snapped: 'Snapped to the nearest point on this street (diagonal or non-grid street)', approx: 'Approximate — the report address didn’t match a City block. Worth adjusting.' }[t.how] || ''}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${S.local ? '' : '<button class="btn small" id="d-move">Adjust location</button>'}
-        <a href="https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}" target="_blank" rel="noopener">Open in Google Maps</a></div>` : ''}
+        <div style="margin-bottom:8px">${t.how === 'gps' ? `GPS fix${t.fix.accuracy != null ? ' ±' + Math.round(t.fix.accuracy) + ' m' : ''}${t.fix.at ? ' · ' + esc(new Date(t.fix.at).toLocaleDateString()) : ''}${t.fix.by ? ' · ' + esc(t.fix.by) : ''}` : ''}${{ manual: 'Adjusted by hand on the map', centerline: 'On the street centerline at this address', snapped: 'Snapped to the nearest point on this street (diagonal or non-grid street)', approx: 'Approximate — the report address didn’t match a City block. Worth adjusting.' }[t.how] || ''}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${S.local ? '' : (navigator.geolocation ? '<button class="btn primary small" id="d-gps">Use my GPS location</button>' : '') + '<button class="btn small" id="d-move">Adjust on map</button>'}
+        <a href="https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}" target="_blank" rel="noopener">Open in Google Maps</a></div>
+        <div id="d-gpsbox" class="gpsbox hidden"></div>
+        <div id="d-next" style="margin-top:10px"></div>` : ''}
     `;
     $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#scrim').classList.remove('hidden');
     if (!S.local) { renderNotes(t.key); $('#d-add').onclick = () => addNote(t.key); }
     const mv = $('#d-move'); if (mv) mv.onclick = () => startAdjust(t);
+    const gp = $('#d-gps'); if (gp) gp.onclick = () => startGps(t);
+    renderNext(t);
     renderHistory(t);
   }
-  function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.add('hidden'); $('#filters').classList.remove('open'); openKey = null; }
+  function closeDrawer() { stopGps(); $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); $('#scrim').classList.add('hidden'); $('#filters').classList.remove('open'); openKey = null; }
   $('#d-close').onclick = closeDrawer; $('#scrim').onclick = closeDrawer;
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrawer(); $('#import').classList.add('hidden'); } });
 
@@ -849,10 +863,7 @@
   $('#adj-save').onclick = async () => {
     if (!adj) return;
     const ll = adj.marker.getLatLng(), t = adj.t;
-    const row = { tree_key: t.key, lat: +ll.lat.toFixed(7), lng: +ll.lng.toFixed(7), updated_by: S.user?.email || null, updated_at: new Date().toISOString() };
-    const { error } = await sb.from('tree_locations').upsert(row);
-    if (error) return toast('Could not save location: ' + error.message, 5000);
-    S.locs.set(t.key, { lat: row.lat, lng: row.lng }); place(t);
+    if (!(await saveLoc(t, ll.lat, ll.lng, 'map', null))) return;
     endAdjust(); renderMap(); toast('Location saved. It stays put in future reports.');
   };
   $('#adj-reset').onclick = async () => {
@@ -863,6 +874,93 @@
     S.locs.delete(t.key); t._pv = null; place(t);
     endAdjust(); renderMap(); toast('Back on the street centerline.');
   };
+
+  // ---------- Saving a location (map drag or GPS) ----------
+  async function saveLoc(t, lat, lng, source, accuracy) {
+    const base = { tree_key: t.key, lat: +lat.toFixed(7), lng: +lng.toFixed(7), updated_by: S.user?.email || null, updated_at: new Date().toISOString() };
+    let { error } = await sb.from('tree_locations').upsert({ ...base, source, accuracy_m: accuracy == null ? null : Math.round(accuracy * 10) / 10 });
+    if (error && /source|accuracy/i.test(error.message)) ({ error } = await sb.from('tree_locations').upsert(base)); // before 003 migration
+    if (error) { toast('Could not save location: ' + error.message, 5000); return false; }
+    S.locs.set(t.key, { lat: base.lat, lng: base.lng, source, accuracy, by: base.updated_by, at: base.updated_at });
+    place(t);
+    return true;
+  }
+
+  // ---------- GPS capture ----------
+  // Collects readings for up to ~12 s and averages the best ones (weighted by accuracy).
+  let gps = null;
+  const GOOD_M = 15;
+  function stopGps() { if (gps) { navigator.geolocation.clearWatch(gps.watch); clearTimeout(gps.timer); gps = null; } }
+  function bestFix(reads) {
+    const min = Math.min(...reads.map(r => r.acc));
+    const use = reads.filter(r => r.acc <= Math.max(min * 1.5, min + 2));
+    const w = use.map(r => 1 / (r.acc * r.acc)), W = w.reduce((a, b) => a + b, 0);
+    return { lat: use.reduce((a, r, i) => a + r.lat * w[i], 0) / W, lng: use.reduce((a, r, i) => a + r.lng * w[i], 0) / W, acc: min, n: use.length };
+  }
+  function startGps(t) {
+    stopGps();
+    if (S.locsMissing) return toast('Run supabase/002_tree_locations.sql in Supabase first.', 6000);
+    const box = $('#d-gpsbox'); box.classList.remove('hidden');
+    const reads = [];
+    const draw = (msg) => {
+      const f = reads.length ? bestFix(reads) : null;
+      const q = !f ? '' : f.acc <= 5 ? 'good' : f.acc <= GOOD_M ? 'ok' : 'poor';
+      box.innerHTML = `<div class="gps-acc ${q}">${f ? '±' + Math.round(f.acc) + ' m' : '…'}</div>
+        <div class="gps-msg">${msg || (f ? `${reads.length} reading${reads.length > 1 ? 's' : ''}${q === 'poor' ? ' · weak signal — step away from buildings or wait' : q === 'good' ? ' · good fix' : ''}` : 'Getting your location… stand at the base of the tree.')}</div>
+        <div class="gps-actions"><button class="btn small" id="gps-cancel">Cancel</button><button class="btn primary small" id="gps-save" ${f ? '' : 'disabled'}>Save${f && f.acc > GOOD_M ? ' anyway' : ''}</button></div>`;
+      $('#gps-cancel').onclick = () => { stopGps(); box.classList.add('hidden'); };
+      $('#gps-save').onclick = async () => {
+        const fx = bestFix(reads); stopGps();
+        box.innerHTML = '<div class="gps-msg">Saving…</div>';
+        if (await saveLoc(t, fx.lat, fx.lng, 'gps', fx.acc)) {
+          box.innerHTML = `<div class="gps-msg"><b>Saved</b> · ±${Math.round(fx.acc)} m from ${fx.n} reading${fx.n > 1 ? 's' : ''}</div>`;
+          if (S.view === 'map') renderMap();
+          renderNext(t, true);
+        } else box.classList.add('hidden');
+      };
+    };
+    draw();
+    gps = { watch: navigator.geolocation.watchPosition(
+      p => { reads.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }); if (reads.length > 30) reads.shift(); draw(); showMe(p); },
+      e => draw(e.code === 1 ? 'Location permission is off. Allow location for this site in your browser settings.' : 'Could not get a GPS fix: ' + esc(e.message)),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }) };
+    gps.timer = setTimeout(() => { if (gps) { navigator.geolocation.clearWatch(gps.watch); draw(reads.length ? 'Done collecting — save, or cancel and try again.' : 'No GPS fix yet.'); } }, 12000);
+  }
+  // Next tree on the same site, in report order — for walking a median
+  function siblings(t) {
+    const so = x => x.seq != null ? x.seq : (parseFloat(x.planter) || 0) * 1000 + (parseFloat(x.treeNo) || 0);
+    return allTrees.filter(x => x.region === t.region && x.site === t.site && x.status !== 'removed').sort((a, b) => so(a) - so(b));
+  }
+  function renderNext(t, justSaved) {
+    const el = $('#d-next'); if (!el) return;
+    const sib = siblings(t), i = sib.findIndex(x => x.key === t.key), nx = sib[i + 1];
+    if (!nx) { el.innerHTML = justSaved ? '<span class="muted">Last tree on this site.</span>' : ''; return; }
+    const left = sib.slice(i + 1).filter(x => !S.locs.has(x.key)).length;
+    el.innerHTML = `<button class="btn small" id="d-nextbtn">Next tree → ${esc(speciesName(nx))}${nx.treeNo ? ' #' + esc(nx.treeNo) : ''} · ${esc(addr(nx))}</button>
+      <div class="muted" style="font-size:12px;margin-top:4px">${left} tree${left === 1 ? '' : 's'} after this on ${esc(t.site)} without a saved location</div>`;
+    $('#d-nextbtn').onclick = () => { stopGps(); openTree(nx); if (justSaved && map && nx.lat != null) map.panTo([nx.lat, nx.lng]); };
+  }
+
+  // ---------- "You are here" on the map ----------
+  let me = null, meWatch = null;
+  function showMe(p) {
+    if (!map) return;
+    const ll = [p.coords.latitude, p.coords.longitude];
+    if (!me) me = { ring: L.circle(ll, { radius: p.coords.accuracy, color: '#1a73e8', weight: 1, fillOpacity: 0.12, interactive: false }).addTo(map),
+                    dot: L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map) };
+    else { me.ring.setLatLng(ll); me.ring.setRadius(p.coords.accuracy); me.dot.setLatLng(ll); }
+  }
+  function toggleLocate(btn) {
+    if (meWatch != null) {
+      navigator.geolocation.clearWatch(meWatch); meWatch = null; btn.classList.remove('on');
+      if (me) { me.ring.remove(); me.dot.remove(); me = null; }
+      return;
+    }
+    btn.classList.add('on'); let first = true;
+    meWatch = navigator.geolocation.watchPosition(p => { showMe(p); if (first) { map.setView([p.coords.latitude, p.coords.longitude], 19); first = false; } },
+      e => { toast(e.code === 1 ? 'Location permission is off for this site.' : 'No GPS fix: ' + e.message, 4000); toggleLocate(btn); },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+  }
 
   // ---------- CSV ----------
   function exportCsv() {

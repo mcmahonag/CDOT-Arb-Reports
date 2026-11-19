@@ -255,6 +255,7 @@
           dirGuess: guessed,
         });
       }
+      t.seq = trees.length;   // row order in the report (inspection order)
       trees.push(t);
     }
     return {
