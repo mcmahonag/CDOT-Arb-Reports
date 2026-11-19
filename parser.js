@@ -37,6 +37,7 @@
     [/^treeprunecategory$/, 'pruneCat'],
     [/^treeremovalcategory$/, 'removalCat'],
     [/^idcode$|^id$/, 'id'],
+    [/^treeid$/, 'uidHint'],   // permanent tree ID, present in workbooks exported by the app
   ];
 
   function clean(v) {
@@ -227,6 +228,7 @@
         comments: str(g('comments')),
         pruneCat: sizeClass(str(g('pruneCat'))),
         removalCat: sizeClass(str(g('removalCat'))),
+        uidHint: /^T-\d+$/i.test(str(g('uidHint'))) ? str(g('uidHint')).toUpperCase() : '',
         status: vacant ? (removed ? 'removed' : 'vacant') : genus ? 'tree' : 'unknown',
         lat: null, lng: null, gx: null, gy: null, gNum: null, gDir: '', aNum: null, aDir: '', dirGuess: false,
       };

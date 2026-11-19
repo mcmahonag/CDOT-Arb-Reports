@@ -25,6 +25,7 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `supabase/003_location_source.sql` | Records GPS accuracy on saved positions |
 | `supabase/004_roles_field_reports.sql` | Staff/contractor roles, region-based access, field reports, photos |
 | `supabase/005_work_orders.sql` | Work orders and the completion function that updates reports |
+| `supabase/006_tree_ids.sql` | Permanent citywide tree IDs (T-10001…) and moves locations, notes, photos and orders onto them |
 
 ## Setup (about 15 minutes)
 
@@ -59,8 +60,9 @@ In Supabase → SQL Editor, run each file from the `supabase` folder:
 1. `003_location_source.sql`
 2. `004_roles_field_reports.sql`: everyone who already has a login becomes **staff**. It also creates the private `tree-photos` storage bucket. If that part errors, create a **private** bucket named `tree-photos` under Storage and run the file again.
 3. `005_work_orders.sql`
+4. `006_tree_ids.sql`: gives every tree already in the database a permanent ID.
 
-For a brand-new database, run `schema.sql`, then 004 and 005. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
+For a brand-new database, run `schema.sql`, then 004, 005 and 006. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
 
 ## Roles
 
@@ -85,4 +87,11 @@ For a brand-new database, run `schema.sql`, then 004 and 005. Don't re-run `sche
 - **Alert:** contractors see a count on the **Work orders** button and a ring around each ordered tree on the map (red = urgent).
 - **Complete:** **Mark complete** records the date and notes and updates the tree in the latest report. Prune sets the last-pruned date, remove marks the tree removed, and treat sets the treatment date.
 - Alerts are in the app only. Email notifications would need an email service connected to Supabase.
+
+## Tree IDs
+
+- **Every tree has a permanent citywide ID** (`T-10001`, `T-10002`, …) that never changes or gets reused. Region isn't part of the ID, so it stays valid if contract boundaries move.
+- **Importing a report** keeps each tree's ID by matching its location. If a planter, number or address changed, it matches by best guess against the previous report (same site, species, DBH) and flags the tree *Tree ID matched by best guess* for staff to confirm or split off with a new ID. Trees added in the field get new IDs.
+- **Merge into…** in the tree panel (staff) combines two IDs that are the same physical tree. History, photos, notes and work orders move to the surviving ID.
+- **Links:** `…/CDOT-Arb-Reports/?tree=T-10042` opens that tree, which works for QR tags. Excel exports include a Tree ID column, and re-importing an exported workbook keeps the IDs.
 

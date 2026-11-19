@@ -231,6 +231,8 @@
     .survey .s-head { gap: 6px; padding: 8px 10px; }
     body .toast { top: 12px; bottom: auto; }
   }
+  .tid { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.tid { color: var(--ink-2); font-size: 12px; }
   .rep-list { margin-top: 16px; }
   .rep-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 0 0 6px; font-weight: 600; }
   .rep-row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; }
@@ -448,9 +450,10 @@
     ['followup', 'My follow-ups', t => openFollowUp(t.key)],
     ['order', 'Open work order', t => S.openOrders.has(t.key)],
     ['uninspected', 'Not inspected yet (draft)', t => t.reportStatus === 'draft' && !t.inspected],
+    ['uidguess', 'Tree ID matched by best guess', t => t.uidMatch === 'auto'],
   ];
   const STATUS = [['tree', 'Trees'], ['vacant', 'Vacant (no tree)'], ['removed', 'Removed'], ['unknown', 'Needs species']];
-  const issueList = t => ISSUES.filter(([k, , fn]) => !['followup', 'order', 'uninspected'].includes(k) && fn(t)).map(([, l]) => l);
+  const issueList = t => ISSUES.filter(([k, , fn]) => !['followup', 'order', 'uninspected', 'uidguess'].includes(k) && fn(t)).map(([, l]) => l);
   const hasIssue = t => t.status === 'tree' && issueList(t).length > 0;
   const openFollowUp = key => (S.notes.get(key) || []).some(n => n.follow_up && !n.resolved);
   const speciesName = t => t.genus ? `${t.genus} ${t.species || ''}`.trim() : (t.status === 'tree' || t.status === 'unknown' ? '—' : 'No tree');
@@ -483,9 +486,10 @@
     if (report.trees) return report.trees;
     const out = []; const page = 1000;
     for (let from = 0; ; from += page) {
-      const { data, error } = await sb.from('report_trees').select('tree_key, data').eq('report_id', report.id).range(from, from + page - 1);
+      let { data, error } = await sb.from('report_trees').select(S.noUids ? 'tree_key, data' : 'tree_key, tree_uid, data').eq('report_id', report.id).range(from, from + page - 1);
+      if (error && !S.noUids && /tree_uid/.test(error.message)) { S.noUids = true; ({ data, error } = await sb.from('report_trees').select('tree_key, data').eq('report_id', report.id).range(from, from + page - 1)); }
       if (error) throw error;
-      for (const r of data) out.push(expand(r.data, report, r.tree_key));
+      for (const r of data) out.push(expand(r.data, report, r.tree_key, r.tree_uid));
       if (data.length < page) break;
     }
     report.trees = out; return out;
@@ -498,11 +502,12 @@
     for (const n of data) { if (!S.notes.has(n.tree_key)) S.notes.set(n.tree_key, []); S.notes.get(n.tree_key).push(n); }
   }
   const EMPTY_FIELDS = ['id','treeNo','planter','side','address','addrDir','street','cross','genus','species','cultivar','code','dbh','pruned','prunedYM','deadwood','wounds','pests','treated','product','removed','reason','planted','plantedYM','lean','hazard','comments','pruneCat','removalCat','lat','lng','gx','gy','gNum','gDir','aNum','aDir','dirGuess','seq','gridRaw','gridDirRaw','inspected','inspectedBy','inspectedAt','added','lastWork'];
-  const NOT_STORED = new Set(['region', 'key', 'month', 'reportId', 'reportStatus', 'how', 'fix']);
+  const NOT_STORED = new Set(['region', 'key', 'lockey', 'uid', 'month', 'reportId', 'reportStatus', 'how', 'fix']);
   function compact(t) { const o = {}; for (const [k, v] of Object.entries(t)) if (v !== '' && v != null && !NOT_STORED.has(k) && k[0] !== '_') o[k] = v; return o; }
-  function expand(d, report, key) {
+  function expand(d, report, key, uidv) {
     const t = {}; for (const k of EMPTY_FIELDS) t[k] = k in d ? d[k] : (['dbh','deadwood','hazard','lat','lng','gx','gy','gNum','aNum'].includes(k) ? null : '');
-    Object.assign(t, d, { key, region: report.region, month: report.month, reportId: report.id, reportStatus: report.status });
+    // key = permanent tree ID when there is one (locations, notes, photos, orders hang off it); lockey = location key in the report
+    Object.assign(t, d, { key: uidv || key, lockey: key, uid: uidv || '', region: report.region, month: report.month, reportId: report.id, reportStatus: report.status });
     return t;
   }
 
@@ -584,7 +589,7 @@
         for (const k of S.f.issues) { const fn = ISSUES.find(i => i[0] === k)[2]; if (!fn(t)) return false; }
       }
       if (q) {
-        const hay = [t.id, t.address, t.addrDir, t.site, t.cross, t.genus, t.species, t.cultivar, t.code, t.pests, t.comments, t.reason, t.wounds].join(' ').toLowerCase();
+        const hay = [t.uid, t.id, t.address, t.addrDir, t.site, t.cross, t.genus, t.species, t.cultivar, t.code, t.pests, t.comments, t.reason, t.wounds].join(' ').toLowerCase();
         if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
       }
       return true;
@@ -612,6 +617,7 @@
       if (k === 'followup' && (S.local || !isStaff())) return '';
       if (k === 'uninspected' && !all.some(t => t.reportStatus === 'draft')) return '';
       if (k === 'order' && !S.openOrders.size) return '';
+      if (k === 'uidguess' && !all.some(t => t.uidMatch === 'auto')) return '';
       const n = iss.filter(fn).length;
       return `<label><input type="checkbox" data-i="${k}" ${S.f.issues.has(k) ? 'checked' : ''}> ${l}<span class="n">${nf(n)}</span></label>`;
     }).join('');
@@ -732,6 +738,7 @@
   // Table
   const COLS = [
     ['region', 'Region', t => RMAP[t.region].name],
+    ['uid', 'Tree ID', t => t.uid, t => parseInt((t.uid || '').slice(2)) || 0],
     ['site', 'Site', t => t.site],
     ['pos', 'Planter · No.', t => [t.planter && 'P' + t.planter, t.treeNo && '#' + t.treeNo].filter(Boolean).join(' '), t => (parseFloat(t.planter) || 0) * 1000 + (parseFloat(t.treeNo) || 0)],
     ['address', 'Address', t => addr(t), t => parseFloat(t.address) || 0],
@@ -739,7 +746,7 @@
     ['dbh', 'DBH (in)', t => t.dbh ?? '', t => t.dbh ?? -1],
     ['pruned', 'Last pruned', t => t.pruned, t => t.prunedYM || ''],
     ['issues', 'Condition / notes', null, t => issueList(t).length],
-    ['id', 'ID', t => t.id, t => parseFloat(t.id) || 0],
+    ['id', 'Contr. ID', t => t.id, t => parseFloat(t.id) || 0],
   ];
   function sorted(list) {
     const col = COLS.find(c => c[0] === S.sort.key);
@@ -759,7 +766,7 @@
       const fu = openFollowUp(t.key) ? '<span class="tag flag">Follow-up</span>' : '';
       const st = t.status === 'tree' ? '' : `<span class="tag muted">${t.status === 'vacant' ? 'Vacant' : t.status === 'removed' ? 'Removed' + (t.removed ? ' ' + esc(t.removed) : '') : 'Needs species'}</span>`;
       const sp = t.genus ? `<span class="sci">${esc(speciesName(t))}</span>${t.cultivar ? ' ‘' + esc(t.cultivar) + '’' : ''}` : esc(speciesName(t));
-      return `<tr data-i="${i}"><td>${esc(RMAP[t.region].name)}</td><td>${esc(t.site)}</td><td>${esc(COLS[2][2](t))}</td><td>${esc(addr(t))}</td><td>${sp}</td><td class="num">${t.dbh ?? ''}</td><td>${esc(t.pruned)}</td><td>${st}${fu}${iss}${t.comments ? '<div class="muted" style="font-size:12px">' + esc(t.comments) + '</div>' : ''}</td><td class="num muted">${esc(t.id)}</td></tr>`;
+      return `<tr data-i="${i}"><td>${esc(RMAP[t.region].name)}</td><td class="tid">${esc(t.uid)}</td><td>${esc(t.site)}</td><td>${esc(COLS[3][2](t))}</td><td>${esc(addr(t))}</td><td>${sp}</td><td class="num">${t.dbh ?? ''}</td><td>${esc(t.pruned)}</td><td>${st}${fu}${iss}${t.comments ? '<div class="muted" style="font-size:12px">' + esc(t.comments) + '</div>' : ''}</td><td class="num muted">${esc(t.id)}</td></tr>`;
     }).join('');
     $('#view-table').innerHTML = `<table class="grid"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>` +
       (rows.length > shown.length ? `<div class="more"><button class="btn" id="more">Show more (${nf(rows.length - shown.length)} left)</button></div>` : '') +
@@ -847,7 +854,7 @@
   async function openTree(t) {
     openKey = t.key;
     $('#d-title').textContent = t.genus ? speciesName(t) + (t.cultivar ? ` ‘${t.cultivar}’` : '') : speciesName(t);
-    $('#d-where').textContent = `${addr(t)} · ${t.site} · ${RMAP[t.region].name}`;
+    $('#d-where').innerHTML = `${t.uid ? `<b class="tid">${esc(t.uid)}</b> · ` : ''}${esc(addr(t))} · ${esc(t.site)} · ${esc(RMAP[t.region].name)}`;
     const row = (l, v) => (v === '' || v == null ? '' : `<dt>${l}</dt><dd>${v}</dd>`);
     const iss = issueList(t);
     const rep_ = reportOf(t), canEd = canEditReport(rep_), orders = S.openOrders.get(t.key) || [];
@@ -861,6 +868,8 @@
         ${rep_ && rep_.status === 'draft' ? `<span class="pill ${t.inspected ? 'submitted' : 'draft'}" style="align-self:center">${t.inspected ? 'Inspected' + (t.inspectedBy ? ' · ' + esc(t.inspectedBy) : '') : 'Not inspected yet'}</span>` : ''}
         ${t.added ? '<span class="pill" style="align-self:center">Added in the field</span>' : ''}
       </div>
+      ${t.uidMatch === 'auto' && isStaff() && !S.local ? `<div class="wo" style="border-color:#c7d7f5"><b>Tree ID matched by best guess</b><div class="muted">${esc(t.uid)} was carried over from an earlier report because this tree's planter, number or address changed. Is it the same tree?</div>
+        <div class="acts"><button class="btn small primary" id="d-uid-ok">Same tree</button><button class="btn small" id="d-uid-new">Different tree — new ID</button></div></div>` : ''}
       ${iss.length ? '<div style="margin-bottom:12px">' + iss.map(x => `<span class="tag">${esc(x)}</span>`).join('') + '</div>' : ''}
       <dl class="kv">
         ${row('Status', t.status === 'tree' ? 'Tree' : t.status === 'vacant' ? 'Vacant (no tree)' : t.status === 'removed' ? 'Removed' : 'Needs species')}
@@ -881,7 +890,8 @@
         ${row('Planted', esc(t.planted))}
         ${row('Removed', esc([t.removed, t.reason].filter(Boolean).join(' · ')))}
         ${row('Comments', esc(t.comments))}
-        ${row('ID code', esc(t.id))}
+        ${row('Tree ID', t.uid ? `<b>${esc(t.uid)}</b>${isStaff() && !S.local ? ' <button class="btn small" id="d-merge" style="margin-left:6px">Merge into…</button>' : ''}` : '')}
+        ${row('Contractor ID code', esc(t.id))}
         ${t.lastWork ? row('Last work order', esc(`${WO_TYPES[t.lastWork.type] || t.lastWork.type} · ${t.lastWork.on || ''}${t.lastWork.by ? ' · ' + t.lastWork.by : ''}${t.lastWork.notes ? ' — ' + t.lastWork.notes : ''}`)) : ''}
         ${row('Report', esc(fmtMonth(t.month)))}
       </dl>
@@ -902,6 +912,23 @@
     if (!S.local) renderPhotos(t);
     $('#d-body').querySelectorAll('[data-wodone]').forEach(b => b.onclick = () => completeOrder(S.orders.find(o => o.id === b.dataset.wodone)));
     const ed = $('#d-edit'); if (ed) ed.onclick = () => { $('#d-body').innerHTML = editForm(t); $('#ed-cancel').onclick = () => openTree(t); $('#ed-save').onclick = () => saveEdit(t); $('#d-body').scrollTop = 0; };
+    const uok = $('#d-uid-ok'); if (uok) uok.onclick = async () => {
+      const d = compact(t); delete d.uidMatch;
+      const { error } = await sb.from('report_trees').update({ data: d }).eq('report_id', t.reportId).eq('tree_key', t.lockey);
+      if (error) return toast(error.message, 5000); delete t.uidMatch; openTree(t); renderView();
+    };
+    const unew = $('#d-uid-new'); if (unew) unew.onclick = async () => {
+      const { data, error } = await sb.rpc('split_tree', { rep_id: t.reportId, key: t.lockey });
+      if (error) return toast(error.message, 5000);
+      await reloadAll(); toast('New ID ' + data + ' assigned.'); const nt = allTrees.find(x => x.key === data); if (nt) openTree(nt);
+    };
+    const mg = $('#d-merge'); if (mg) mg.onclick = async () => {
+      const into = (prompt(`Merge ${t.uid} into which tree ID? Use this when two IDs are the same physical tree. Photos, notes, work orders and history move to that ID.`) || '').trim().toUpperCase();
+      if (!into) return;
+      const { error } = await sb.rpc('merge_trees', { from_uid: t.uid, into_uid: into });
+      if (error) return toast(error.message, 5000);
+      await reloadAll(); toast(`${t.uid} merged into ${into}.`); const nt = allTrees.find(x => x.key === into); if (nt) openTree(nt); else closeDrawer();
+    };
     const wb = $('#d-wo'); if (wb) wb.onclick = () => { dlg('Issue work order', `<div style="margin-bottom:10px"><b>${esc(treeLabel(t))}</b><div class="muted">${esc(t.site)} · ${esc(RMAP[t.region].name)}</div></div>` + orderForm(1)); $('#wo-create').onclick = async () => { if (await createOrders([t])) { closeDlg(); openTree(t); renderView(); } }; };
     const mv = $('#d-move'); if (mv) mv.onclick = () => startAdjust(t);
     const gp = $('#d-gps'); if (gp) gp.onclick = () => startGps(t);
@@ -915,9 +942,10 @@
   async function renderHistory(t) {
     let rows = [];
     if (S.local) {
-      rows = S.reports.filter(r => r.region === t.region).map(r => ({ month: r.month, d: (r.trees || []).find(x => x.key === t.key) })).filter(x => x.d);
+      rows = S.reports.filter(r => r.region === t.region).map(r => ({ month: r.month, d: (r.trees || []).find(x => x.key === t.key || x.lockey === t.lockey) })).filter(x => x.d);
     } else {
-      const { data, error } = await sb.from('report_trees').select('data, reports!inner(month, region)').eq('tree_key', t.key);
+      const { data, error } = t.uid ? await sb.from('report_trees').select('data, reports!inner(month, region)').eq('tree_uid', t.uid)
+        : await sb.from('report_trees').select('data, reports!inner(month, region)').eq('tree_key', t.lockey || t.key);
       if (error) { $('#d-hist').textContent = 'Could not load history.'; return; }
       rows = data.map(r => ({ month: r.reports.month, d: r.data }));
     }
@@ -1072,7 +1100,7 @@
 
   // ---------- CSV ----------
   function exportCsv() {
-    const cols = ['region', 'site', 'planter', 'treeNo', 'address', 'addrDir', 'cross', 'side', 'status', 'genus', 'species', 'cultivar', 'code', 'dbh', 'pruned', 'pruneCat', 'removalCat', 'deadwood', 'wounds', 'pests', 'treated', 'product', 'lean', 'hazard', 'planted', 'removed', 'reason', 'comments', 'id', 'month', 'lat', 'lng', 'how'];
+    const cols = ['uid', 'region', 'site', 'planter', 'treeNo', 'address', 'addrDir', 'cross', 'side', 'status', 'genus', 'species', 'cultivar', 'code', 'dbh', 'pruned', 'pruneCat', 'removalCat', 'deadwood', 'wounds', 'pests', 'treated', 'product', 'lean', 'hazard', 'planted', 'removed', 'reason', 'comments', 'id', 'month', 'lat', 'lng', 'how'];
     const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const lines = [cols.join(',')].concat(sorted(S.filtered).map(t => cols.map(c => q(c === 'region' ? RMAP[t.region].name : t[c])).join(',')));
     const a = document.createElement('a');
@@ -1211,13 +1239,15 @@
         const { trees, ...meta } = rep;
         const { data: saved, error } = await sb.from('reports').insert(meta).select().single();
         if (error) throw error;
-        const rows = trees.map(t => ({ report_id: saved.id, tree_key: t.key, site: t.site, data: compact(t) }));
+        p.status = 'Matching tree IDs…'; renderPending();
+        const idNote = await assignUids(rep.region, rep.month, trees);
+        const rows = trees.map(t => ({ report_id: saved.id, tree_key: t.key, site: t.site, data: compact(t), ...(t.uid ? { tree_uid: t.uid } : {}) }));
         for (let i = 0; i < rows.length; i += 500) {
           const { error: e2 } = await sb.from('report_trees').insert(rows.slice(i, i + 500));
           if (e2) throw e2;
           p.status = `Saving… ${nf(Math.min(i + 500, rows.length))} of ${nf(rows.length)}`; renderPending();
         }
-        p.status = `Saved · ${nf(rows.length)} rows`; renderPending();
+        p.status = `Saved · ${nf(rows.length)} rows${idNote ? ' · ' + idNote : ''}`; renderPending();
       }
       await loadReports();
       renderExisting();
@@ -1354,10 +1384,10 @@
       trees.forEach(place);
       const HEAD = ['Dir.', 'Address', 'Dir.', 'From: To:', 'Planter', 'No.', 'Direction', 'Genus', 'Species', 'Variety / Cultivar', 'DBH', 'Species Code', 'Pruning',
         'Deadwood Percentage', 'Trunk Wounds/Injury', 'Pests-Disease', 'Pest Treatment Applied', 'Product Used', 'Tree Removed', 'Reason', 'Tree Planted', 'Lean',
-        'ISA Hazardous rating 1 - 4', 'Comments', 'Tree Prune Category', 'Tree Removal Category', 'ID Code', 'Latitude', 'Longitude', 'Location source', 'Inspected by', 'Inspected on'];
+        'ISA Hazardous rating 1 - 4', 'Comments', 'Tree Prune Category', 'Tree Removal Category', 'ID Code', 'Tree ID', 'Latitude', 'Longitude', 'Location source', 'Inspected by', 'Inspected on'];
       const rowOf = t => [t.gridRaw ?? t.gNum ?? '', t.gridDirRaw || t.gDir || '', t.address, t.addrDir, t.cross, t.planter, t.treeNo, t.side,
         t.status === 'vacant' || t.status === 'removed' ? (t.genus ? t.genus : 'NO TREE') : t.genus, t.species, t.cultivar, t.dbh ?? '', t.code, t.pruned,
-        t.deadwood ?? '', t.wounds, t.pests, t.treated, t.product, t.removed, t.reason, t.planted, t.lean, t.hazard ?? '', t.comments, t.pruneCat, t.removalCat, t.id,
+        t.deadwood ?? '', t.wounds, t.pests, t.treated, t.product, t.removed, t.reason, t.planted, t.lean, t.hazard ?? '', t.comments, t.pruneCat, t.removalCat, t.id, t.uid || '',
         t.lat ?? '', t.lng ?? '', { gps: 'GPS', manual: 'Map', centerline: 'Street centerline', snapped: 'Street (snapped)', approx: 'Approximate' }[t.how] || '',
         t.inspectedBy || '', t.inspectedAt ? t.inspectedAt.slice(0, 10) : ''];
       const so = x => x.seq != null ? x.seq : (parseFloat(x.planter) || 0) * 1000 + (parseFloat(x.treeNo) || 0);
@@ -1516,6 +1546,71 @@
     });
   }
 
+  // ---------- Permanent tree IDs ----------
+  // Match an imported report's trees to existing IDs: exact location key, an ID column in the workbook,
+  // or a best guess against the previous report (same site, planter/number/address/species/DBH). The rest get new IDs.
+  async function assignUids(region, month, trees) {
+    if (S.noUids) return '';
+    const reg = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from('trees').select('uid, current_key, site, merged_into').eq('region', region).range(from, from + 999);
+      if (error) { S.noUids = true; return ''; }
+      reg.push(...data); if (data.length < 1000) break;
+    }
+    const live = new Set(reg.filter(x => !x.merged_into).map(x => x.uid));
+    const byKey = new Map(reg.filter(x => x.current_key && !x.merged_into).map(x => [x.current_key, x.uid]));
+    const used = new Set();
+    let exact = 0, guessed = 0;
+    for (const t of trees) {
+      let u = (t.uidHint && live.has(t.uidHint) && !used.has(t.uidHint)) ? t.uidHint : byKey.get(t.key);
+      if (u && !used.has(u)) { t.uid = u; used.add(u); exact++; }
+    }
+    // best guess against the previous report for this region
+    const prevRep = S.reports.filter(r => r.region === region && r.month !== month).sort((a, b) => b.month.localeCompare(a.month))[0];
+    const prev = prevRep ? (await loadTrees(prevRep)).filter(x => x.uid && !used.has(x.uid)) : [];
+    const bySite = new Map(); prev.forEach(x => { if (!bySite.has(x.site)) bySite.set(x.site, []); bySite.get(x.site).push(x); });
+    const score = (a, b) => {
+      let s = 0;
+      if (a.planter === b.planter && a.treeNo === b.treeNo) s += 3;
+      const da = Math.abs((parseFloat(a.address) || -1e9) - (parseFloat(b.address) || 1e9));
+      if (da === 0) s += 3; else if (da <= 6) s += 1;
+      if (a.genus && b.genus) s += a.genus.toLowerCase() === b.genus.toLowerCase() ? 2 : -3;
+      if (a.dbh && b.dbh && Math.abs(a.dbh - b.dbh) <= Math.max(1.5, b.dbh * 0.2)) s += 1;
+      if (a.id && a.id === b.id) s += 2;
+      return s;
+    };
+    for (const t of trees) {
+      if (t.uid) continue;
+      const cands = (bySite.get(t.site) || []).filter(x => !used.has(x.uid)).map(x => ({ x, s: score(t, x) })).sort((p, q) => q.s - p.s);
+      if (cands[0] && cands[0].s >= 4 && (!cands[1] || cands[0].s - cands[1].s >= 2)) {
+        t.uid = cands[0].x.uid; t.uidMatch = 'auto'; used.add(t.uid); guessed++;
+        await sb.from('trees').update({ current_key: t.key, site: t.site }).eq('uid', t.uid);
+      }
+    }
+    const fresh = trees.filter(t => !t.uid);
+    for (let i = 0; i < fresh.length; i += 500) {
+      const chunk = fresh.slice(i, i + 500);
+      const { data, error } = await sb.from('trees').insert(chunk.map(t => ({ region, site: t.site, current_key: t.key, created_by: me_() }))).select('uid, current_key');
+      if (error) { toast('Could not assign tree IDs: ' + error.message, 5000); return ''; }
+      const m = new Map(data.map(x => [x.current_key, x.uid])); chunk.forEach(t => { t.uid = m.get(t.key) || ''; });
+    }
+    return `IDs: ${nf(exact)} matched${guessed ? `, ${nf(guessed)} best guess (review)` : ''}, ${nf(fresh.length)} new`;
+  }
+  async function reloadAll() {
+    S.reports.forEach(r => { r.trees = null; });
+    await Promise.all([loadReports(), loadLocs(), loadOrders(), isStaff() ? loadNotes() : null]);
+    await refresh();
+  }
+  // Open a tree from a link like ?tree=T-10042 (e.g. a QR tag)
+  async function openFromLink() {
+    const id = (new URLSearchParams(location.search).get('tree') || '').toUpperCase();
+    if (!id) return;
+    let t = allTrees.find(x => x.uid === id);
+    if (!t && S.region !== 'all') { S.region = 'all'; renderRegions(); await refresh(); t = allTrees.find(x => x.uid === id); }
+    if (!t) return toast(`Tree ${id} isn't in the latest reports you can see.`, 5000);
+    setView('map'); if (map && t.lat != null) map.setView([t.lat, t.lng], 19); openTree(t);
+  }
+
   // ---------- Field reports ----------
   async function startFieldReport(region, month, btn) {
     const prev = S.reports.filter(r => r.region === region && r.month < month).sort((a, b) => b.month.localeCompare(a.month))[0];
@@ -1527,7 +1622,7 @@
         sites: prev ? prev.sites : [], warnings: [] };
       const { data: saved, error } = await sb.from('reports').insert(meta).select().single();
       if (error) throw error;
-      const rows = trees.map(t => { const d = compact(t); delete d.inspected; delete d.inspectedBy; delete d.inspectedAt; return { report_id: saved.id, tree_key: t.key, site: t.site, data: d }; });
+      const rows = trees.map(t => { const d = compact(t); delete d.inspected; delete d.inspectedBy; delete d.inspectedAt; delete d.uidMatch; return { report_id: saved.id, tree_key: t.lockey || t.key, site: t.site, data: d, ...(t.uid ? { tree_uid: t.uid } : {}) }; });
       for (let i = 0; i < rows.length; i += 500) {
         const { error: e2 } = await sb.from('report_trees').insert(rows.slice(i, i + 500));
         if (e2) throw e2;
@@ -1586,7 +1681,7 @@
     if (upd.status !== 'tree' && upd.status !== 'unknown') { /* keep species for history; vacant/removed flagged by status */ }
     Object.assign(upd, { inspected: true, inspectedBy: me_(), inspectedAt: new Date().toISOString() });
     const next = { ...t, ...upd };
-    const { error } = await sb.from('report_trees').update({ data: compact(next), edited_by: me_(), edited_at: new Date().toISOString() }).eq('report_id', r.id).eq('tree_key', t.key);
+    const { error } = await sb.from('report_trees').update({ data: compact(next), edited_by: me_(), edited_at: new Date().toISOString() }).eq('report_id', r.id).eq('tree_key', t.lockey || t.key);
     if (error) return toast('Could not save: ' + error.message, 5000);
     Object.assign(t, upd); t._pv = null; place(t);
     toast('Saved.'); openTree(t); refresh();
@@ -1625,9 +1720,14 @@
         status: g('#nt-genus') ? 'tree' : 'unknown', street: sample.street || '', siteType: sample.siteType || '', added: true,
         inspected: true, inspectedBy: me_(), inspectedAt: new Date().toISOString(), lat: pos ? +pos.lat.toFixed(7) : null, lng: pos ? +pos.lng.toFixed(7) : null, seq: 100000 + (r.trees || []).length };
       $('#nt-save').disabled = true;
-      const { error } = await sb.from('report_trees').insert({ report_id: r.id, tree_key: key, site, data: compact(t), edited_by: me_(), edited_at: new Date().toISOString() });
+      let newUid = '';
+      if (!S.noUids) {
+        const { data: reg, error: e0 } = await sb.from('trees').insert({ region: r.region, site, current_key: key, created_by: me_() }).select('uid').single();
+        if (!e0 && reg) newUid = reg.uid;
+      }
+      const { error } = await sb.from('report_trees').insert({ report_id: r.id, tree_key: key, site, data: compact(t), edited_by: me_(), edited_at: new Date().toISOString(), ...(newUid ? { tree_uid: newUid } : {}) });
       if (error) { $('#nt-save').disabled = false; return toast('Could not add: ' + error.message, 5000); }
-      const nt = expand(compact(t), r, key); r.trees.push(nt);
+      const nt = expand(compact(t), r, key, newUid); r.trees.push(nt);
       if (pos) await saveLoc(nt, pos.lat, pos.lng, pos.how === 'gps' ? 'gps' : 'map', pos.acc ?? null);
       closeDlg(); $('#crosshair').classList.add('hidden'); await refresh(); openTree(nt); toast('Tree added.');
     };
@@ -1723,7 +1823,8 @@
     enterApp(false);
     await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders()]);
     if (S.region !== 'all' && !myRegions().includes(S.region)) S.region = 'all';
-    renderRegions(); refresh(true);
+    renderRegions(); await refresh(true);
+    openFromLink();
   }
 
   async function boot() {
