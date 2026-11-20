@@ -687,7 +687,8 @@
   }
 
   // Map
-  let map, markers, renderer;
+  let map, markers, renderer, lastDotClick = 0;
+  const TOUCH = window.matchMedia && matchMedia('(pointer: coarse)').matches;
   function initMap() {
     if (map || !window.L) return;
     map = L.map('map', { preferCanvas: true, zoomControl: true, maxZoom: 21 }).setView([41.86, -87.68], 11);
@@ -709,7 +710,19 @@
     (bases[saved] || streets).addTo(map);
     L.control.layers(bases, null, { position: 'topright', collapsed: false }).addTo(map);
     map.on('baselayerchange', e => { try { localStorage.setItem('arb-basemap', e.name); } catch (err) {} });
-    renderer = L.canvas({ padding: 0.5, tolerance: 6 });
+    renderer = L.canvas({ padding: 0.5, tolerance: TOUCH ? 14 : 6 });
+    // Fingers miss small dots: a tap that doesn't hit a dot opens the nearest tree within reach
+    map.on('click', e => {
+      if (Date.now() - lastDotClick < 400 || $('#crosshair') && !$('#crosshair').classList.contains('hidden')) return;
+      const p = e.containerPoint, reach = TOUCH ? 36 : 14;
+      let best = null, bd = Infinity;
+      for (const t of S.filtered) {
+        if (t.lat == null) continue;
+        const q = map.latLngToContainerPoint([t.lat, t.lng]), d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d < bd) { bd = d; best = t; }
+      }
+      if (best && bd <= reach) survey ? surveySelect(best) : openTree(best);
+    });
     markers = L.layerGroup().addTo(map);
     if (navigator.geolocation) { const b = $('#btn-locate'); b.classList.remove('hidden'); b.onclick = () => toggleLocate(b); }
   }
@@ -722,13 +735,13 @@
       const vacant = t.status === 'vacant' || t.status === 'removed';
       const color = vacant ? getCss('--vacant') : hasIssue(t) ? getCss('--issue') : getCss('--tree');
       const m = L.circleMarker([t.lat, t.lng], {
-        renderer, radius: vacant ? 4 : 5.5, weight: vacant ? 2 : 1.5,
+        renderer, radius: (vacant ? 4 : 5.5) + (TOUCH ? 1.5 : 0), weight: vacant ? 2 : 1.5,
         color: vacant ? color : '#ffffff', fillColor: vacant ? '#ffffff' : color, fillOpacity: 1, opacity: 1,
       });
       const wo = S.openOrders.get(t.key);
       if (wo) markers.addLayer(L.circleMarker([t.lat, t.lng], { renderer, radius: 10, weight: 2.5, color: wo.some(o => o.priority === 'urgent') ? '#e5484d' : '#f59e0b', fill: false, interactive: false }));
       m.bindTooltip(`<b>${esc(speciesName(t))}</b>${t.dbh ? ' · ' + t.dbh + '"' : ''}<br>${esc(addr(t))}`, { direction: 'top', offset: [0, -4] });
-      m.on('click', () => (survey ? surveySelect(t) : openTree(t)));
+      m.on('click', () => { lastDotClick = Date.now(); survey ? surveySelect(t) : openTree(t); });
       markers.addLayer(m); pts.push([t.lat, t.lng]);
     }
     if ((fit || !renderMap.fitted) && pts.length) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 17 }); renderMap.fitted = true; }
