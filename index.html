@@ -97,7 +97,7 @@
   .gps-acc.good { color: #0b7a35; } .gps-acc.ok { color: #8a6100; } .gps-acc.poor { color: var(--danger); }
   .gps-msg { font-size: 13px; color: var(--ink-2); }
   .gps-actions { display: flex; gap: 6px; justify-content: flex-end; }
-  .legend .note { color: var(--ink-3); margin-top: 3px; max-width: 220px; }
+  .legend .lg-note { color: var(--ink-3); margin-top: 3px; max-width: 220px; }
 
   /* Table */
   table.grid { width: 100%; border-collapse: collapse; background: var(--card); font-size: 13px; }
@@ -253,11 +253,38 @@
   .toast { position: fixed; z-index: 1200; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 9px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); }
 
   .only-mobile { display: none; }
+  .only-mobile-block { display: none; }
+  @media (max-width: 1500px) { header.top .chip small { display: none; } }
+  @media (max-width: 1150px) and (min-width: 821px) { .brand span { display: none; } header.top { gap: 8px; } }
+  .wo-ico { display: none; }
+  .full-btn { top: 124px; display: block; }
+  .lg-title { display: none !important; font-weight: 600; cursor: pointer; }
+  body.map-full header.top, body.map-full .tabs, body.map-full #banner { display: none !important; }
+  .filters .chip { color: var(--ink); border-color: var(--line); background: #fff; margin: 0 4px 6px 0; }
+  .filters .chip small { color: var(--ink-3); }
+  .filters .chip[aria-pressed="true"] { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .filters .chip[aria-pressed="true"] small { color: #fff; }
+  .filters #month { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; color: var(--ink); }
+  .filters .regions { display: flex; flex-wrap: wrap; }
   @media (max-width: 820px) {
     .layout { grid-template-columns: 1fr; }
     aside.filters { position: fixed; z-index: 950; top: 0; left: 0; bottom: 0; width: min(320px, 88%); transform: translateX(-105%); transition: transform .2s ease; box-shadow: 8px 0 30px rgba(0,0,0,.12); padding-top: max(14px, env(safe-area-inset-top)); }
     aside.filters.open { transform: none; }
     .only-mobile { display: inline-flex; }
+    .only-mobile-block { display: block; }
+    header.top { padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top)); flex-wrap: nowrap; }
+    .brand b { font-size: 15px; white-space: nowrap; }
+    .wo-txt { display: none; } .wo-ico { display: inline; }
+    .top select, .top .btn-ghost, .btn-light { padding: 6px 9px; }
+    .tabs { padding: 4px 8px 0; }
+    .tab { padding: 7px 10px; }
+    .legend { padding: 6px 9px; }
+    .legend .lg-title { display: flex !important; gap: 6px; }
+    .legend.collapsed > div:not(.lg-title) { display: none; }
+    .legend.collapsed .lg-arrow { transform: rotate(-90deg); display: inline-block; }
+    .legend .lg-note { display: none; }
+    .map-tools { left: 52px; top: 10px; }
+    .map-tools .btn { padding: 6px 9px; }
     .brand span { display: none; }
     header.top { gap: 8px; }
     .regions { order: 5; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
@@ -276,12 +303,12 @@
 </head>
 <body>
 <header class="top">
-  <button class="btn-ghost only-mobile" id="btn-filters" aria-label="Filters">☰ Filters</button>
+  <button class="btn-ghost only-mobile" id="btn-filters" aria-label="Menu and filters">☰</button>
   <div class="brand"><b>Arborist Reports</b><span>CDOT Landscape · tree inspections</span></div>
   <div class="regions" id="regions"></div>
   <div class="spacer"></div>
   <select id="month" aria-label="Report month"></select>
-  <button class="btn-ghost hidden" id="btn-orders">Work orders <span class="badge hidden" id="orders-badge"></span></button>
+  <button class="btn-ghost hidden" id="btn-orders"><span class="wo-txt">Work orders</span><span class="wo-ico" aria-hidden="true">📋</span> <span class="badge hidden" id="orders-badge"></span></button>
   <button class="btn-ghost hidden" id="btn-people">People</button>
   <button class="btn-light" id="btn-import">Reports</button>
   <button class="btn-ghost hidden" id="btn-signout">Sign out</button>
@@ -303,6 +330,7 @@
 
 <div class="layout hidden" id="app">
   <aside class="filters" id="filters">
+    <div class="m-slot only-mobile-block" id="m-slot"><div class="f-group"><label class="f">Region</label><div id="m-regions"></div></div><div class="f-group"><label class="f">Report</label><div id="m-month"></div></div><div class="f-group" id="m-acct"></div></div>
     <div class="f-group">
       <label class="f" for="f-q">Search</label>
       <input type="search" id="f-q" placeholder="Address, species, comment, ID…">
@@ -349,6 +377,7 @@
     <section class="view" id="view-map">
       <div id="map"></div>
       <button class="locate-btn hidden" id="btn-locate" title="Show my location" aria-label="Show my location">◎</button>
+      <button class="locate-btn full-btn" id="btn-full" title="Full-screen map" aria-label="Full-screen map">⤢</button>
       <div class="map-tools" id="map-tools">
         <button class="btn small hidden" id="btn-survey">📍 Survey locations</button>
         <button class="btn small hidden" id="btn-addtree">＋ Add tree</button>
@@ -359,12 +388,13 @@
         <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Satellite (top right) to see the median.</div></div>
         <div class="adj-actions"><button class="btn small" id="adj-reset" title="Remove your adjustment and go back to the street centerline">Reset</button><button class="btn small" id="adj-cancel">Cancel</button><button class="btn primary small" id="adj-save">Save location</button></div>
       </div>
-      <div class="legend">
+      <div class="legend" id="legend">
+        <div class="lg-title">Key <span class="lg-arrow">▾</span></div>
         <div><span class="dot tree"></span>Tree</div>
         <div><span class="dot issue"></span>Tree with condition noted</div>
         <div><span class="dot vacant"></span>Vacant / removed</div>
         <div><span class="dot order"></span>Open work order</div>
-        <div class="note" id="legend-note">Placed on City street centerlines from each report address. Drag-adjusted spots are exact.</div>
+        <div class="lg-note" id="legend-note">Placed on City street centerlines from each report address. Drag-adjusted spots are exact.</div>
       </div>
     </section>
     <section class="view hidden" id="view-table"></section>
@@ -566,7 +596,7 @@
     const el = $('#regions');
     el.innerHTML = [`<button class="chip" data-r="all" aria-pressed="${S.region === 'all'}">All regions</button>`]
       .concat(REGIONS.filter(r => myRegions().includes(r.id)).map(r => `<button class="chip ${has(r.id) ? '' : 'empty'}" data-r="${r.id}" aria-pressed="${S.region === r.id}" title="${esc(r.contractor)}${has(r.id) ? '' : ' · no report yet'}">${esc(r.name)} <small>${esc(r.contractor)}</small></button>`)).join('');
-    el.querySelectorAll('.chip').forEach(b => b.onclick = () => { S.region = b.dataset.r; S.f.site = ''; renderRegions(); refresh(true); });
+    el.querySelectorAll('.chip').forEach(b => b.onclick = () => { S.region = b.dataset.r; S.f.site = ''; renderRegions(); refresh(true); if (isPhone()) $('#filters').classList.remove('open'); });
     const months = [...new Set(S.reports.map(r => r.month))].sort().reverse();
     if (S.month !== 'latest' && !months.includes(S.month)) S.month = 'latest';
     $('#month').innerHTML = `<option value="latest">Latest report</option>` + months.map(m => `<option value="${m}" ${S.month === m ? 'selected' : ''}>${fmtMonth(m)}</option>`).join('');
@@ -688,6 +718,30 @@
 
   // Map
   let map, markers, renderer, lastDotClick = 0;
+  const isPhone = () => window.matchMedia && matchMedia('(max-width: 820px)').matches;
+  // On phones, region buttons, month and account buttons live in the ☰ menu to give the map room
+  function placeHeaderControls() {
+    const ph = isPhone(), top = document.querySelector('header.top');
+    const regions = $('#regions'), month = $('#month'), people = $('#btn-people'), out = $('#btn-signout');
+    if (ph) {
+      $('#m-regions').appendChild(regions); $('#m-month').appendChild(month);
+      $('#m-acct').append(people, out); [people, out].forEach(x => { x.classList.remove('btn-ghost'); x.classList.add('btn'); });
+    } else {
+      const spacer = top.querySelector('.spacer');
+      top.insertBefore(regions, spacer); spacer.after(month);
+      $('#btn-import').before(people); top.appendChild(out);
+      [people, out].forEach(x => { x.classList.remove('btn'); x.classList.add('btn-ghost'); });
+    }
+  }
+  placeHeaderControls();
+  if (window.matchMedia) matchMedia('(max-width: 820px)').addEventListener('change', () => { placeHeaderControls(); if (map) map.invalidateSize(); });
+  $('#legend').classList.toggle('collapsed', isPhone());
+  $('#legend').querySelector('.lg-title').onclick = () => $('#legend').classList.toggle('collapsed');
+  $('#btn-full').onclick = () => {
+    const on = document.body.classList.toggle('map-full');
+    $('#btn-full').textContent = on ? '⤡' : '⤢'; $('#btn-full').title = on ? 'Exit full screen' : 'Full-screen map';
+    setTimeout(() => map && map.invalidateSize(), 50);
+  };
   const TOUCH = window.matchMedia && matchMedia('(pointer: coarse)').matches;
   function initMap() {
     if (map || !window.L) return;
@@ -708,7 +762,7 @@
     let saved = 'Streets';
     try { saved = localStorage.getItem('arb-basemap') || 'Streets'; } catch (e) {}
     (bases[saved] || streets).addTo(map);
-    L.control.layers(bases, null, { position: 'topright', collapsed: false }).addTo(map);
+    L.control.layers(bases, null, { position: 'topright', collapsed: isPhone() }).addTo(map);
     map.on('baselayerchange', e => { try { localStorage.setItem('arb-basemap', e.name); } catch (err) {} });
     renderer = L.canvas({ padding: 0.5, tolerance: TOUCH ? 14 : 6 });
     // Fingers miss small dots: a tap that doesn't hit a dot opens the nearest tree within reach
