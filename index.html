@@ -487,7 +487,7 @@
     const out = []; const page = 1000;
     for (let from = 0; ; from += page) {
       let { data, error } = await sb.from('report_trees').select(S.noUids ? 'tree_key, data' : 'tree_key, tree_uid, data').eq('report_id', report.id).range(from, from + page - 1);
-      if (error && !S.noUids && /tree_uid/.test(error.message)) { S.noUids = true; ({ data, error } = await sb.from('report_trees').select('tree_key, data').eq('report_id', report.id).range(from, from + page - 1)); }
+      if (error && /tree_uid/.test(error.message)) { S.noUids = true; ({ data, error } = await sb.from('report_trees').select('tree_key, data').eq('report_id', report.id).range(from, from + page - 1)); }
       if (error) throw error;
       for (const r of data) out.push(expand(r.data, report, r.tree_key, r.tree_uid));
       if (data.length < page) break;
@@ -548,7 +548,8 @@
     t.fix = null;
     if (t._pv === geoVer) return;
     if (t._approx === undefined) t._approx = t.gx != null && t.gy != null ? ArbParser.gridToLatLng(t.gx, t.gy) : (t.lat != null ? { lat: t.lat, lng: t.lng } : null);
-    const p = GEO ? ArbGeo.locate(GEO, t, t._approx) : (t._approx ? { ...t._approx, how: 'approx' } : null);
+    const inCity = q => q && q.lat > 41.62 && q.lat < 42.05 && q.lng > -87.96 && q.lng < -87.50;
+    const p = GEO ? ArbGeo.locate(GEO, t, t._approx) : (inCity(t._approx) ? { ...t._approx, how: 'approx' } : null);
     if (p) { t.lat = p.lat; t.lng = p.lng; t.how = p.how; } else { t.lat = null; t.lng = null; t.how = ''; }
     t._pv = geoVer;
   }
