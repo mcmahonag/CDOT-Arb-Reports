@@ -1284,7 +1284,7 @@
     const startable = S.local ? [] : myRegions().filter(rg => !S.reports.some(r => r.region === rg && r.month === thisMonth && r.source !== 'inventory'));
     const statusPill = r => r.status === 'draft' ? '<span class="pill draft">Draft · in progress</span>' : r.status === 'submitted' ? `<span class="pill submitted">Submitted${r.submitted_by ? ' · ' + esc(r.submitted_by) : ''}</span>` : '';
     const invRegs = staff && !S.local ? REGIONS.map(r => r.id).filter(rg => S.inv.some(v => v.region === rg)) : [];
-    const priceHtml = S.local || S.propMissing ? '' : `<div class="rep-list"><h3>Contract prices</h3>` + REGIONS.filter(r => myRegions().includes(r.id)).map(r => {
+    const priceHtml = S.local || S.propMissing ? '' : `<div class="rep-list"><h3>Contract prices</h3>${staff ? `<div class="rep-row"><div class="muted" style="font-size:12px">One workbook with a tab per region (North, Southwest, Central, Southeast…) loads them all at once.</div><button class="btn small primary" data-pimp="">Import all regions</button></div>` : ''}` + REGIONS.filter(r => myRegions().includes(r.id)).map(r => {
       const items = S.prices.filter(p => p.region === r.id);
       return `<div class="rep-row"><div><b>${esc(r.name)}</b> · ${items.length ? `${items.length} items${items[0].sheet ? ' · ' + esc(items[0].sheet) : ''}${items[0].effective ? ' · from ' + esc(items[0].effective) : ''}` : '<span class="muted">none yet</span>'}</div>
         <div style="display:flex;gap:6px">${items.length ? `<button class="btn small" data-pview="${r.id}">View</button>` : ''}${staff ? `<button class="btn small" data-pimp="${r.id}">${items.length ? 'Replace' : 'Import'}</button>` : ''}</div></div>`;
@@ -2112,7 +2112,7 @@
   const bandText = items => items.filter(p => sizeRule(p.description)).map(p => { const r = sizeRule(p.description); return (r.kind === 'prune' ? 'prune ' : 'remove ') + (r.max === Infinity ? '>' + Math.floor(r.min) : r.min + '–' + r.max) + '"'; });
   function importPrices(region) {
     const body = dlg('Import contract prices', `<div class="form-grid">
-        <label>Region<select id="pi-reg">${REGIONS.map(r => `<option value="${r.id}" ${r.id === region ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
+        <label>Region<select id="pi-reg">${!region ? '<option value="" selected>All regions — one tab each</option>' : ''}${REGIONS.map(r => `<option value="${r.id}" ${r.id === region ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
         <label>Effective date<input type="date" id="pi-eff"></label>
         <label class="wide">Contract / sheet name<input id="pi-sheet" placeholder="e.g. 2026 Southwest landscape contract"></label>
         <label class="wide">Paste the price rows (item no., description, unit price, unit) — straight from Excel is fine<textarea id="pi-text" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px" placeholder="16	TREE PRUNING 6-12 IN. CALIPER, SW	$150.00	Each"></textarea></label>
@@ -2124,6 +2124,7 @@
     const preview = () => {
       book = null; $('#pi-reg').disabled = false; $('#pi-save').textContent = 'Save prices';
       parsed = parsePriceText($('#pi-text').value);
+      if (parsed.items.length && !$('#pi-reg').value) { $('#pi-preview').innerHTML = `<b style="color:var(--danger)">${parsed.items.length} items read — pick which region they're for above.</b>`; $('#pi-save').disabled = true; return; }
       const tree = parsed.items.filter(p => sizeRule(p.description));
       $('#pi-preview').innerHTML = !parsed.items.length ? '' : `<b style="color:var(--ink)">${parsed.items.length} items read</b>${parsed.skipped.length ? ` · ${parsed.skipped.length} lines skipped` : ''} · ${tree.length} priced by tree size (${tree.map(p => { const r = sizeRule(p.description); return (r.kind === 'prune' ? 'prune ' : 'remove ') + (r.max === Infinity ? '>' + Math.floor(r.min) : r.min + '–' + r.max) + '"'; }).join(', ')})
         <table class="lines"><thead><tr><th>#</th><th>Description</th><th class="r">Price</th><th>Unit</th></tr></thead><tbody>${parsed.items.slice(0, 12).map(p => `<tr><td>${esc(p.item_no)}</td><td>${esc(p.description)}</td><td class="r">${money(p.unit_price)}</td><td>${esc(p.unit)}</td></tr>`).join('')}${parsed.items.length > 12 ? `<tr><td></td><td colspan="3" class="muted">…and ${parsed.items.length - 12} more</td></tr>` : ''}</tbody></table>
@@ -2131,6 +2132,7 @@
       $('#pi-save').disabled = !parsed.items.length;
     };
     $('#pi-text').oninput = preview;
+    $('#pi-reg').onchange = () => { if (!book) preview(); };
     $('#pi-file').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       try {
