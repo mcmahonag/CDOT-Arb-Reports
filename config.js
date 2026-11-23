@@ -4,6 +4,9 @@ window.APP_CONFIG = {
   SUPABASE_URL: 'https://ktkbvehrfzforxndzvtv.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_0LkYdtvM1pq_f2YCt4A5lg_PhXdTqot',   // publishable key (safe to be public)
 
+  // Shown at the bottom of the Help page, e.g. 'Mike — CDOT Horticulture, 312-555-0100, mike@example.gov'
+  HELP_CONTACT: '',
+
   // Regions and their landscape contractors
   REGIONS: [
     { id: 'north',     name: 'North',     contractor: 'Christy Webber' },

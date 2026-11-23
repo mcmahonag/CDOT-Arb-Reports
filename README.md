@@ -110,3 +110,7 @@ The fresh location survey. Staff and contractors can collect it, each limited to
 
 Saving an inventory tree also sets that tree ID's location everywhere, so linked trees move to their GPS position in the old reports straight away.
 
+## Help page
+
+The **?** button in the header opens a how-to and FAQ written for contractors: getting started, field reports, work orders, GPS locations, the inventory, and fixes for common problems. Staff also see a section with their own tools. It has a search box, and `https://mcmahonag.github.io/CDOT-Arb-Reports/?help` opens it directly, even before signing in, so you can text or email that link. Put a contact name and number in `HELP_CONTACT` in `config.js` to show it at the bottom.
+

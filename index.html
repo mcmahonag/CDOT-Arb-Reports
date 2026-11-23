@@ -262,6 +262,18 @@
   }
   .tid { font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.tid { color: var(--ink-2); font-size: 12px; }
+  #btn-help { font-weight: 700; min-width: 34px; }
+  .help details { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: #fff; }
+  .help summary { padding: 11px 12px; font-weight: 600; cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; }
+  .help summary::-webkit-details-marker { display: none; }
+  .help summary::after { content: '▸'; margin-left: auto; color: var(--ink-3); transition: transform .15s; }
+  .help details[open] summary::after { transform: rotate(90deg); }
+  .help .ans { padding: 0 14px 12px; font-size: 14px; line-height: 1.5; color: var(--ink); }
+  .help .ans ol, .help .ans ul { padding-left: 20px; margin: 6px 0; }
+  .help .ans li { margin: 3px 0; }
+  .help h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 16px 0 8px; }
+  .help kbd { display: inline-block; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 0 6px; font: inherit; font-size: 13px; background: #fafbf9; white-space: nowrap; }
+  .help input[type=search] { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; margin-bottom: 10px; }
   .rep-list { margin-top: 16px; }
   .rep-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 0 0 6px; font-weight: 600; }
   .rep-row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; }
@@ -340,6 +352,7 @@
   <select id="month" aria-label="Report month"></select>
   <button class="btn-ghost hidden" id="btn-orders"><span class="wo-txt">Work orders</span><span class="wo-ico" aria-hidden="true">📋</span> <span class="badge hidden" id="orders-badge"></span></button>
   <button class="btn-ghost hidden" id="btn-people">People</button>
+  <button class="btn-ghost" id="btn-help" title="How-to and FAQ" aria-label="Help">?</button>
   <button class="btn-light" id="btn-import">Reports</button>
   <button class="btn-ghost hidden" id="btn-signout">Sign out</button>
 </header>
@@ -1824,6 +1837,69 @@
       toast(`${RMAP[region].name} inventory published.`);
     } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast('Could not publish: ' + e.message, 6000); }
   }
+
+  // ---------- Help / FAQ ----------
+  const HELP = [
+    ['Getting started', [
+      ['Signing in and getting access', `Use the email and password CDOT gave you. If you see <b>Waiting for access</b>, your login works but CDOT still needs to assign your regions — let your CDOT contact know. You'll only see the regions your company maintains.`],
+      ['Put the app on your phone’s home screen', `<b>iPhone (Safari):</b> open the app, tap the Share button <kbd>⬆</kbd>, then <b>Add to Home Screen</b>.<br><b>Android (Chrome):</b> tap <kbd>⋮</kbd> → <b>Add to Home screen</b> (or <b>Install app</b>).<br>It opens like an app and keeps you signed in.`],
+      ['Allow location and camera', `The first time you use GPS or take a photo, your phone asks for permission — tap <b>Allow</b> (or <b>While using the app</b>). If you said no by mistake, see <b>“GPS says waiting” or permission is off</b> below.`],
+      ['Finding your way around', `<ul><li><b>☰</b> (phone) opens regions, the report month, search and filters.</li><li><b>Map · Table · Sites · Summary</b> are different views of the same trees.</li><li><b>◎</b> zooms to where you are and follows you; drag the map to stop following, tap ◎ again to come back.</li><li><b>⤢</b> makes the map full screen. The layers button (top right) switches to <b>Satellite</b>.</li><li>Tap any dot to open that tree. Search by address, species or tree ID (e.g. <b>T-10042</b>).</li></ul>`],
+      ['What the dots mean', `<b>Blue</b> = tree · <b>Orange</b> = tree with a condition noted (pests, deadwood, lean, hazard…) · <b>Hollow grey</b> = vacant or removed · <b>Red or amber ring</b> = open work order (red = urgent) · <b>Green dot with a dark outline</b> = new GPS inventory · <b>Pulsing blue dot</b> = you.`],
+    ]],
+    ['Monthly field report', [
+      ['Start the month', `Open <b>Reports</b> and tap <b>Start field report</b> for your region. It copies last month’s trees so you update them instead of starting over.`],
+      ['Inspect a tree', `<ol><li>Tap the tree on the map (or in the Table).</li><li>Tap <b>Edit inspection</b>.</li><li>Update what changed — DBH, condition, pruning, deadwood, pests, treatment, removal, lean, hazard, comments.</li><li>Tap <b>Save · mark inspected</b>.</li></ol>The top of the screen shows how many trees are done. Use the filter <b>Not inspected yet</b> to see what’s left.`],
+      ['Add a tree that isn’t on the list', `Tap <b>＋ Add tree</b> on the map, then use your GPS (stand at the trunk) or center the red cross on the tree. Fill in the species and size.`],
+      ['Add photos', `Open the tree and tap <b>📷 Add photo</b> — it opens your camera. Photos upload right away (you need a signal).`],
+      ['Submit the report', `When you’re done, open <b>Reports</b> and tap <b>Submit</b>. After submitting you can’t edit it; ask CDOT to <b>Reopen</b> it if something needs fixing. You can tap <b>Excel</b> anytime to download it in the usual one-tab-per-site layout.`],
+    ]],
+    ['Work orders', [
+      ['Seeing your work orders', `The 📋 / <b>Work orders</b> button shows a count of open orders (red if any are urgent). Trees with an order have a ring on the map. Open the list to see what, where, priority, due date and notes from CDOT.`],
+      ['Completing a work order', `<ol><li>Open the order (or the tree) and tap <b>Mark complete</b>.</li><li>Enter the date the work was done and a short note.</li><li>Add a photo from the tree’s panel if you have one.</li></ol>Completing it updates the arborist report for you: a <b>prune</b> sets the last-pruned date, a <b>removal</b> marks the tree removed, a <b>treatment</b> records the treatment date.`],
+    ]],
+    ['GPS tree locations', [
+      ['Getting a good GPS reading', `<ul><li>Stand right at the trunk.</li><li>Give it a few seconds — the reading improves (watch the <b>±</b> number).</li><li>Aim for <b>±5 m or better</b> (green). Yellow is OK; red means step away from buildings and wait.</li><li>Open sky helps; tall buildings and heavy canopy make it worse.</li></ul>`],
+      ['Fix one tree’s location', `Open the tree and tap <b>Use my GPS location</b> while standing at it, or <b>Adjust on map</b> to drag the pin (switch to Satellite to see the median). The fix sticks for every future report.`],
+      ['Survey a whole site', `Tap <b>📍 Survey locations</b>, pick the site, then stand at any tree and tap <b>Here</b> on its card. Order doesn’t matter — handy on wide medians with several rows. Tap a dot on the map to jump to its card; <b>Not located yet</b> shows what’s left.`],
+    ]],
+    ['New GPS inventory', [
+      ['How the inventory works', `<ol><li>Tap <b>🌳 New inventory</b>, choose the region and site, and a planter/row if it has one.</li><li>Stand at the trunk and tap <b>📍 Drop tree here</b>.</li><li>If the tree is one of the old records listed, tap it — it keeps its tree ID and fills in species and DBH for you to correct. Otherwise tap <b>None of these</b>.</li><li>Fill in the required fields (marked <b style="color:var(--danger)">*</b>): position, condition, genus, species, DBH and a photo. Vacant spots only need position, condition and photo.</li><li>Tap <b>Save tree</b>. The next position number fills in automatically.</li></ol>`],
+      ['A point landed in the wrong spot', `In the inventory list, tap <b>Nudge</b> and drag the pin onto the trunk (Satellite helps). Or use <b>Use map center</b> instead of GPS: center the red cross on the tree and tap it again.`],
+      ['Old trees that aren’t there anymore', `At the end of a site, tap <b>Old records not linked yet</b> and mark any tree that’s gone as <b>Not found</b>.`],
+    ]],
+    ['Problems', [
+      ['“GPS says waiting” or permission is off', `<b>iPhone:</b> Settings → Privacy &amp; Security → Location Services: make sure it’s on, then set <b>Safari Websites</b> to <b>While Using the App</b>.<br><b>Android:</b> in Chrome, tap the icon left of the web address → <b>Permissions</b> → <b>Location</b> → Allow. Also make sure the phone’s Location is on.<br>Then close the app completely and reopen it.`],
+      ['A save or photo upload failed', `The app saves straight to the database, so it needs a signal. Wait for coverage and tap save again — nothing is lost on screen until you close it.`],
+      ['I can’t edit a report', `Submitted reports are locked. Ask CDOT to reopen it.`],
+      ['I don’t see my region or a site', `Your login only shows your company’s regions. If one is missing, ask CDOT to check your access on the People screen.`],
+      ['The screen looks zoomed in or stuck', `Close the app completely (swipe it away) and reopen it. If it’s still off, pinch out once.`],
+      ['What’s a tree ID (T-10042)?', `Every tree has a permanent ID that never changes, even if the planter or address is renumbered. Use it when talking with CDOT about a specific tree — searching for it finds the tree instantly.`],
+    ]],
+  ];
+  const HELP_STAFF = ['For CDOT staff', [
+    ['Give a contractor access', `Add their login in Supabase (Authentication → Users → Add user, auto-confirm), then open <b>People</b>: set role <b>Contractor</b>, the company, and tick their regions.`],
+    ['Issue work orders', `From a tree: <b>Issue work order</b>. After a storm: filter the map/table to the trees you want (site, condition, search), then <b>Work order for these trees</b> in the filters panel. Set urgent/routine, due date and an event name.`],
+    ['Review best-guess tree IDs', `Filter <b>Tree ID matched by best guess</b> after an import and confirm each (<b>Same tree</b> / <b>Different tree — new ID</b>). Use <b>Merge into…</b> when two IDs are the same tree.`],
+    ['Publish an inventory', `When a region’s inventory is done, open <b>Reports</b> → <b>Publish as report</b>. It becomes the base for future field reports; publishing again replaces it.`],
+    ['Share this help page', `Send contractors this link: <b>${location.origin + location.pathname}?help</b>`],
+  ]];
+  function showHelp() {
+    const sections = HELP.concat(S.user && isStaff() && !S.local ? [HELP_STAFF] : []);
+    const contact = (CFG.HELP_CONTACT || '').trim();
+    const body = dlg('How-to & FAQ', `<div class="help">
+      <input type="search" id="help-q" placeholder="Search help (e.g. GPS, photo, submit)">
+      ${sections.map(([title, items]) => `<h3>${esc(title)}</h3>` + items.map(([q, a]) => `<details><summary>${esc(q)}</summary><div class="ans">${a}</div></details>`).join('')).join('')}
+      <h3>Questions?</h3><div class="ans" style="padding:0 2px">${contact ? esc(contact) : 'Contact your CDOT contract manager.'}</div>
+    </div>`);
+    $('#help-q').oninput = e => {
+      const q = e.target.value.trim().toLowerCase();
+      body.querySelectorAll('.help details').forEach(d => { const hit = !q || d.textContent.toLowerCase().includes(q); d.style.display = hit ? '' : 'none'; d.open = !!q && hit; });
+      body.querySelectorAll('.help h3').forEach(h => { let n = h.nextElementSibling, any = false; while (n && n.tagName === 'DETAILS') { if (n.style.display !== 'none') any = true; n = n.nextElementSibling; } h.style.display = any || !q ? '' : 'none'; });
+    };
+  }
+  $('#btn-help').onclick = showHelp;
+  if (new URLSearchParams(location.search).has('help')) setTimeout(showHelp, 300);
 
   // ---------- Generic dialog ----------
   function dlg(title, html) { $('#dlg-title').textContent = title; $('#dlg-body').innerHTML = html; $('#dlg').classList.remove('hidden'); return $('#dlg-body'); }
