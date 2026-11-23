@@ -283,6 +283,16 @@
   .help h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 16px 0 8px; }
   .help kbd { display: inline-block; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 0 6px; font: inherit; font-size: 13px; background: #fafbf9; white-space: nowrap; }
   .help input[type=search] { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; margin-bottom: 10px; }
+  table.lines { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+  table.lines th, table.lines td { border-bottom: 1px solid var(--line-2); padding: 6px 5px; text-align: left; vertical-align: top; }
+  table.lines th { color: var(--ink-3); font-weight: 600; font-size: 12px; }
+  table.lines td.r, table.lines th.r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  table.lines input { width: 70px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; text-align: right; }
+  table.lines tfoot td { font-weight: 700; border-bottom: 0; }
+  .nc { color: #8a5a00; font-size: 11px; font-weight: 600; }
+  .msg { border-left: 3px solid var(--line); padding: 4px 10px; margin: 6px 0; font-size: 13px; }
+  .msg.staff { border-color: var(--brand-2); } .msg .by { color: var(--ink-3); font-size: 11.5px; }
+  .pill.questions { background: #fff1c2; color: #6b4b00; } .pill.approved { background: #e6f4ea; color: #137333; } .pill.declined, .pill.withdrawn { background: #eef0ec; color: var(--ink-2); }
   .rep-list { margin-top: 16px; }
   .rep-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin: 0 0 6px; font-weight: 600; }
   .rep-row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; }
@@ -305,6 +315,7 @@
   .only-mobile { display: none; }
   .only-mobile-block { display: none; }
   @media (max-width: 1500px) { header.top .chip small { display: none; } }
+  @media (max-width: 1400px) and (min-width: 821px) { header.top .wo-txt { display: none; } header.top .wo-ico { display: inline; } }
   @media (max-width: 1150px) and (min-width: 821px) { .brand span { display: none; } header.top { gap: 8px; } }
   .wo-ico { display: none; }
   .full-btn { top: 124px; display: block; }
@@ -361,6 +372,7 @@
   <select id="month" aria-label="Report month"></select>
   <button class="btn-ghost hidden" id="btn-orders"><span class="wo-txt">Work orders</span><span class="wo-ico" aria-hidden="true">📋</span> <span class="badge hidden" id="orders-badge"></span></button>
   <button class="btn-ghost hidden" id="btn-people">People</button>
+ <button class="btn-ghost hidden" id="btn-props"><span class="wo-txt">Proposals</span><span class="wo-ico" aria-hidden="true">📝</span> <span class="badge hidden" id="props-badge"></span></button>
   <button class="btn-ghost" id="btn-help" title="How-to and FAQ" aria-label="Help">?</button>
   <button class="btn-light" id="btn-import">Reports</button>
   <button class="btn-ghost hidden" id="btn-signout">Sign out</button>
@@ -415,6 +427,7 @@
       <button class="btn small" id="f-clear">Clear filters</button>
       <button class="btn small" id="f-csv">Export CSV</button>
       <button class="btn small hidden" id="f-orders">Work order for these trees</button>
+      <button class="btn small hidden" id="f-prop">Proposal for these trees</button>
       <button class="btn small only-mobile" id="f-done">Done</button>
     </div>
   </aside>
@@ -522,6 +535,8 @@
     orders: [],               // work orders (open + recent)
     openOrders: new Map(),    // tree_key -> [open orders]
     inv: [],                  // new GPS inventory rows
+    prices: [],               // contract unit prices (active)
+    proposals: [],            // contractor proposals
     tableLimit: 300,
     filtered: [],
   };
@@ -999,6 +1014,7 @@
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         ${canEd ? '<button class="btn primary small" id="d-edit">Edit inspection</button>' : ''}
         ${!S.local && isStaff() && !S.ordersMissing ? '<button class="btn small" id="d-wo">Issue work order</button>' : ''}
+        ${!S.local && !S.propMissing && canEditLocs(t.region) ? '<button class="btn small" id="d-prop">Propose work</button>' : ''}
         ${rep_ && rep_.status === 'draft' ? `<span class="pill ${t.inspected ? 'submitted' : 'draft'}" style="align-self:center">${t.inspected ? 'Inspected' + (t.inspectedBy ? ' · ' + esc(t.inspectedBy) : '') : 'Not inspected yet'}</span>` : ''}
         ${t.added ? '<span class="pill" style="align-self:center">Added in the field</span>' : ''}
       </div>
@@ -1066,6 +1082,7 @@
       if (error) return toast(error.message, 5000);
       await reloadAll(); toast(`${t.uid} merged into ${into}.`); const nt = allTrees.find(x => x.key === into); if (nt) openTree(nt); else closeDrawer();
     };
+    const pb = $('#d-prop'); if (pb) pb.onclick = () => proposalBuilder([t]);
     const wb = $('#d-wo'); if (wb) wb.onclick = () => { dlg('Issue work order', `<div style="margin-bottom:10px"><b>${esc(treeLabel(t))}</b><div class="muted">${esc(t.site)} · ${esc(RMAP[t.region].name)}</div></div>` + orderForm(1)); $('#wo-create').onclick = async () => { if (await createOrders([t])) { closeDlg(); openTree(t); renderView(); } }; };
     const mv = $('#d-move'); if (mv) mv.onclick = () => startAdjust(t);
     const gp = $('#d-gps'); if (gp) gp.onclick = () => startGps(t);
@@ -1267,7 +1284,12 @@
     const startable = S.local ? [] : myRegions().filter(rg => !S.reports.some(r => r.region === rg && r.month === thisMonth && r.source !== 'inventory'));
     const statusPill = r => r.status === 'draft' ? '<span class="pill draft">Draft · in progress</span>' : r.status === 'submitted' ? `<span class="pill submitted">Submitted${r.submitted_by ? ' · ' + esc(r.submitted_by) : ''}</span>` : '';
     const invRegs = staff && !S.local ? REGIONS.map(r => r.id).filter(rg => S.inv.some(v => v.region === rg)) : [];
-    $('#imp-existing').innerHTML =
+    const priceHtml = S.local || S.propMissing ? '' : `<div class="rep-list"><h3>Contract prices</h3>` + REGIONS.filter(r => myRegions().includes(r.id)).map(r => {
+      const items = S.prices.filter(p => p.region === r.id);
+      return `<div class="rep-row"><div><b>${esc(r.name)}</b> · ${items.length ? `${items.length} items${items[0].sheet ? ' · ' + esc(items[0].sheet) : ''}${items[0].effective ? ' · from ' + esc(items[0].effective) : ''}` : '<span class="muted">none yet</span>'}</div>
+        <div style="display:flex;gap:6px">${items.length ? `<button class="btn small" data-pview="${r.id}">View</button>` : ''}${staff ? `<button class="btn small" data-pimp="${r.id}">${items.length ? 'Replace' : 'Import'}</button>` : ''}</div></div>`;
+    }).join('') + '</div>';
+    $('#imp-existing').innerHTML = priceHtml +
       (invRegs.length ? `<div class="rep-list"><h3>New GPS inventory</h3>` + invRegs.map(rg => { const all = S.inv.filter(v => v.region === rg); return `<div class="rep-row"><div><b>${esc(RMAP[rg].name)}</b> · ${nf(all.filter(v => v.status !== 'not_found').length)} trees collected · ${new Set(all.map(v => v.site)).size} sites${all.some(v => v.status === 'not_found') ? ' · ' + all.filter(v => v.status === 'not_found').length + ' not found' : ''}</div><button class="btn small primary" data-pub="${rg}">Publish as report</button></div>`; }).join('') + '</div>' : '') +
       (startable.length ? `<div class="rep-list"><h3>Field reports</h3><div class="muted" style="font-size:12px;margin-bottom:6px">Starts this month's report from the latest one, ready to update tree by tree in the field.</div>` +
         startable.map(rg => `<div class="rep-row"><div><b>${esc(RMAP[rg].name)}</b> · ${esc(fmtMonth(thisMonth))}</div><button class="btn small primary" data-start="${rg}">Start field report</button></div>`).join('') + '</div>' : '') +
@@ -1287,6 +1309,8 @@
     q('button[data-reopen]').forEach(b => b.onclick = () => reopenReport(list[+b.dataset.reopen]));
     q('button[data-start]').forEach(b => b.onclick = () => startFieldReport(b.dataset.start, thisMonth, b));
     q('button[data-pub]').forEach(b => b.onclick = () => publishInventory(b.dataset.pub, b));
+    q('button[data-pview]').forEach(b => b.onclick = () => { $('#import').classList.add('hidden'); viewPrices(b.dataset.pview); });
+    q('button[data-pimp]').forEach(b => b.onclick = () => { $('#import').classList.add('hidden'); importPrices(b.dataset.pimp); });
   }
   async function deleteReport(r, btn) {
     const label = `${RMAP[r.region]?.name || r.region} ${fmtMonth(r.month)}`;
@@ -1976,6 +2000,10 @@
       ['Fix one tree’s location', `Open the tree and tap <b>Use my GPS location</b> while standing at it, or <b>Adjust on map</b> to drag the pin (switch to Satellite to see the median). The fix sticks for every future report.`],
       ['Survey a whole site', `Tap <b>📍 Survey locations</b>, pick the site, then stand at any tree and tap <b>Here</b> on its card. Order doesn’t matter — handy on wide medians with several rows. Tap a dot on the map to jump to its card; <b>Not located yet</b> shows what’s left.`],
     ]],
+    ['Proposals (contractor → CDOT)', [
+      ['Propose work to CDOT', `<ol><li>Open a tree and tap <b>Propose work</b> — or filter to the trees you want (a site, a species, a condition) and tap <b>Proposal for these trees</b> in the filters.</li><li>Pick the work (treatment, pruning, removal…), describe what you found and what you recommend, and add photos.</li><li>Pruning and removal price themselves from each tree’s DBH using the contract size classes. For other work, search the contract (e.g. “chemical application”) and enter the quantity (hours, pounds, each).</li><li>Tap <b>Send to CDOT</b>. CDOT gets it right away.</li></ol>Prices always come from the contract price sheet. Items that aren’t in the contract can be added, but they’re clearly flagged for CDOT.`],
+      ['Questions, approval and work orders', `CDOT can approve, decline or ask a question. A question shows a count on 📝 <b>Proposals</b> — open it, type your reply and tap <b>Send reply</b>. When CDOT approves, a work order is created for each tree; complete them as usual and the report updates. <b>Print / PDF</b> gives a copy for your records.`],
+    ]],
     ['New GPS inventory', [
       ['How the inventory works', `<ol><li>Tap <b>🌳 New inventory</b>, choose the region and site, and a planter/row if it has one.</li><li>Stand at the trunk and tap <b>📍 Drop tree here</b>.</li><li>If the tree is one of the old records listed, tap it — it keeps its tree ID and fills in species and DBH for you to correct. Otherwise tap <b>None of these</b>.</li><li>Fill in the required fields (marked <b style="color:var(--danger)">*</b>): position, condition, genus, species, DBH and a photo. Vacant spots only need position, condition and photo.</li><li>Tap <b>Save tree</b>. The next position number fills in automatically.</li></ol>`],
       ['A point landed in the wrong spot', `In the inventory list, tap <b>Nudge</b> and drag the pin onto the trunk (Satellite helps). Or use <b>Use map center</b> instead of GPS: center the red cross on the tree and tap it again.`],
@@ -1994,6 +2022,7 @@
     ['Give a contractor access', `Add their login in Supabase (Authentication → Users → Add user, auto-confirm), then open <b>People</b>: set role <b>Contractor</b>, the company, and tick their regions.`],
     ['Issue work orders', `From a tree: <b>Issue work order</b>. After a storm: filter the map/table to the trees you want (site, condition, search), then <b>Work order for these trees</b> in the filters panel. Set urgent/routine, due date and an event name.`],
     ['Review best-guess tree IDs', `Filter <b>Tree ID matched by best guess</b> after an import and confirm each (<b>Same tree</b> / <b>Different tree — new ID</b>). Use <b>Merge into…</b> when two IDs are the same tree.`],
+    ['Contract prices and proposals', `Open <b>Reports</b> → <b>Contract prices</b> → <b>Import</b> for a region and paste the rows from the price sheet (item no., description, unit price, unit) or choose the Excel file. Pruning and removal items with a size range in the name (e.g. “6-12 IN.”, “OVER 45" DBH”) are used to price proposals by tree size automatically. Incoming proposals show a count on <b>Proposals</b>; approving one issues a work order for each tree.`],
     ['Publish an inventory', `When a region’s inventory is done, open <b>Reports</b> → <b>Publish as report</b>. It becomes the base for future field reports; publishing again replaces it.`],
     ['Share this help page', `Send contractors this link: <b>${location.origin + location.pathname}?help</b>`],
   ]];
@@ -2013,6 +2042,318 @@
   }
   $('#btn-help').onclick = showHelp;
   if (new URLSearchParams(location.search).has('help')) setTimeout(showHelp, 300);
+
+  // ---------- Contract prices ----------
+  const money = n => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  async function loadPrices() {
+    if (S.local) return;
+    const { data, error } = await sb.from('price_items').select('*').eq('active', true).order('sort').limit(5000);
+    if (error) { S.propMissing = true; return; }
+    S.prices = data;
+  }
+  // "TREE PRUNING 6-12 IN. CALIPER" -> {kind:'prune', min:6, max:12}; ">26 IN." / "OVER 45" -> open-ended
+  function sizeRule(desc) {
+    const d = String(desc || '').toUpperCase();
+    const kind = /PRUN/.test(d) ? 'prune' : /REMOV/.test(d) && /TREE/.test(d) ? 'remove' : null;
+    if (!kind) return null;
+    let m = d.match(/(?:>|OVER)\s*(\d+(?:\.\d+)?)/);
+    if (m) return { kind, min: +m[1] + 0.001, max: Infinity };
+    m = d.match(/(\d+(?:\.\d+)?)\s*(?:"|IN\.?|INCH(?:ES)?)?\s*(?:-|TO)\s*(\d+(?:\.\d+)?)/);
+    return m ? { kind, min: +m[1], max: +m[2] } : null;
+  }
+  // Each tree goes to the size band it falls in; between bands (e.g. 12.5") it goes to the lower one
+  function bandFor(items, kind, dbh) {
+    const bands = items.map(p => ({ p, r: sizeRule(p.description) })).filter(x => x.r && x.r.kind === kind).sort((a, b) => a.r.min - b.r.min);
+    if (dbh == null || !bands.length) return null;
+    let pick = null;
+    for (const b of bands) if (dbh >= b.r.min - 0.5) pick = b;
+    return pick && (dbh <= pick.r.max + 0.999 || pick.r.max === Infinity) ? pick.p : null;
+  }
+  function parsePriceText(text) {
+    const items = [], skipped = [];
+    for (const raw of String(text).split(/\r?\n/)) {
+      const line = raw.replace(/\u00a0/g, ' ').trim(); if (!line) continue;
+      const m = line.match(/^(?:(\d+[A-Za-z]?)[\s\t]+)?(.+?)[\s\t]+\$?\s*([\d,]+(?:\.\d{1,2})?)\s*[\t ]+([A-Za-z][A-Za-z .\/]*)$/);
+      if (!m || /^(item|no\.?|description)\b/i.test(line)) { skipped.push(line); continue; }
+      const price = parseFloat(m[3].replace(/,/g, ''));
+      if (!isFinite(price)) { skipped.push(line); continue; }
+      items.push({ item_no: m[1] || '', description: m[2].replace(/\s{2,}/g, ' ').trim(), unit_price: price, unit: m[4].trim() });
+    }
+    return { items, skipped };
+  }
+  function importPrices(region) {
+    const body = dlg('Import contract prices', `<div class="form-grid">
+        <label>Region<select id="pi-reg">${REGIONS.map(r => `<option value="${r.id}" ${r.id === region ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
+        <label>Effective date<input type="date" id="pi-eff"></label>
+        <label class="wide">Contract / sheet name<input id="pi-sheet" placeholder="e.g. 2026 Southwest landscape contract"></label>
+        <label class="wide">Paste the price rows (item no., description, unit price, unit) — straight from Excel is fine<textarea id="pi-text" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px" placeholder="16	TREE PRUNING 6-12 IN. CALIPER, SW	$150.00	Each"></textarea></label>
+        <label class="wide">…or choose the Excel / CSV file<input type="file" id="pi-file" accept=".xlsx,.xls,.xlsm,.csv"></label>
+      </div>
+      <div id="pi-preview" class="muted" style="margin-top:10px;font-size:13px"></div>
+      <div class="form-actions"><button class="btn primary" id="pi-save" disabled>Save prices</button></div>`);
+    let parsed = { items: [], skipped: [] };
+    const preview = () => {
+      parsed = parsePriceText($('#pi-text').value);
+      const tree = parsed.items.filter(p => sizeRule(p.description));
+      $('#pi-preview').innerHTML = !parsed.items.length ? '' : `<b style="color:var(--ink)">${parsed.items.length} items read</b>${parsed.skipped.length ? ` · ${parsed.skipped.length} lines skipped` : ''} · ${tree.length} priced by tree size (${tree.map(p => { const r = sizeRule(p.description); return (r.kind === 'prune' ? 'prune ' : 'remove ') + (r.max === Infinity ? '>' + Math.floor(r.min) : r.min + '–' + r.max) + '"'; }).join(', ')})
+        <table class="lines"><thead><tr><th>#</th><th>Description</th><th class="r">Price</th><th>Unit</th></tr></thead><tbody>${parsed.items.slice(0, 12).map(p => `<tr><td>${esc(p.item_no)}</td><td>${esc(p.description)}</td><td class="r">${money(p.unit_price)}</td><td>${esc(p.unit)}</td></tr>`).join('')}${parsed.items.length > 12 ? `<tr><td></td><td colspan="3" class="muted">…and ${parsed.items.length - 12} more</td></tr>` : ''}</tbody></table>
+        ${parsed.skipped.length ? `<details><summary>Lines not understood</summary>${parsed.skipped.slice(0, 20).map(l => '<div>' + esc(l) + '</div>').join('')}</details>` : ''}`;
+      $('#pi-save').disabled = !parsed.items.length;
+    };
+    $('#pi-text').oninput = preview;
+    $('#pi-file').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        await waitFor(() => window.XLSX, 10000);
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+        $('#pi-text').value = rows.map(r => r.map(c => String(c).trim()).filter(Boolean).join('\t')).filter(Boolean).join('\n');
+        if (!$('#pi-sheet').value) $('#pi-sheet').value = f.name.replace(/\.[^.]+$/, '');
+        preview();
+      } catch (err) { toast('Could not read that file: ' + (err && err.message || 'spreadsheet reader did not load'), 5000); }
+    };
+    $('#pi-save').onclick = async () => {
+      const rg = $('#pi-reg').value, btn = $('#pi-save'); btn.disabled = true; btn.textContent = 'Saving…';
+      const { error: e1 } = await sb.from('price_items').update({ active: false }).eq('region', rg).eq('active', true);
+      if (e1) { btn.disabled = false; btn.textContent = 'Save prices'; return toast(e1.message, 5000); }
+      const rows = parsed.items.map((p, i) => ({ ...p, region: rg, sheet: $('#pi-sheet').value.trim() || null, effective: $('#pi-eff').value || null, active: true, sort: i }));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await sb.from('price_items').insert(rows.slice(i, i + 200));
+        if (error) { btn.disabled = false; btn.textContent = 'Try again'; return toast('Could not save prices: ' + error.message, 6000); }
+      }
+      await loadPrices(); closeDlg(); toast(`${rows.length} ${RMAP[rg].name} prices saved.`);
+    };
+  }
+  function viewPrices(region) {
+    const items = S.prices.filter(p => p.region === region);
+    const body = dlg(`${RMAP[region].name} contract prices`, `<input type="search" id="pv-q" placeholder="Search (e.g. pruning, chemical, mulch)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <table class="lines"><thead><tr><th>#</th><th>Description</th><th class="r">Price</th><th>Unit</th></tr></thead><tbody id="pv-body"></tbody></table>`);
+    const draw = () => { const q = $('#pv-q').value.toLowerCase(); $('#pv-body').innerHTML = items.filter(p => !q || (p.item_no + ' ' + p.description + ' ' + p.unit).toLowerCase().includes(q)).map(p => `<tr><td>${esc(p.item_no)}</td><td>${esc(p.description)}</td><td class="r">${money(p.unit_price)}</td><td>${esc(p.unit)}</td></tr>`).join(''); };
+    $('#pv-q').oninput = draw; draw();
+  }
+
+  // ---------- Proposals (contractor -> CDOT) ----------
+  const SVC = { treat: 'Treatment', prune: 'Pruning', remove: 'Removal', plant: 'Planting', other: 'Other' };
+  const PSTAT = { submitted: 'Awaiting CDOT', questions: 'Question from CDOT', approved: 'Approved', declined: 'Declined', withdrawn: 'Withdrawn' };
+  async function loadProposals() {
+    if (S.local || S.propMissing) return;
+    const { data, error } = await sb.from('proposals').select('*').order('submitted_at', { ascending: false }).limit(1000);
+    if (error) { S.propMissing = true; return; }
+    S.proposals = data; propBadge();
+  }
+  function propBadge() {
+    const b = $('#props-badge'), btn = $('#btn-props');
+    btn.classList.toggle('hidden', S.local || S.propMissing);
+    const n = isStaff() ? S.proposals.filter(p => p.status === 'submitted').length : S.proposals.filter(p => p.status === 'questions').length;
+    b.textContent = n; b.classList.toggle('hidden', !n); b.classList.toggle('urgent', S.proposals.some(p => p.priority === 'urgent' && p.status === 'submitted'));
+    btn.title = isStaff() ? `${n} proposal${n === 1 ? '' : 's'} waiting for review` : `${n} proposal${n === 1 ? '' : 's'} with a question from CDOT`;
+  }
+  $('#f-prop').onclick = () => {
+    const trees = S.filtered.filter(t => t.status !== 'removed');
+    if (!trees.length) return toast('No trees in the current filter.');
+    proposalBuilder(trees);
+  };
+  function proposalBuilder(trees) {
+    const regs = [...new Set(trees.map(t => t.region))];
+    if (regs.length > 1) return toast('Pick trees from one region at a time (use the region buttons or a site filter).', 4500);
+    const region = regs[0];
+    if (!canEditLocs(region)) return toast('You can only propose work in your own regions.');
+    const items = S.prices.filter(p => p.region === region);
+    const sites = [...new Set(trees.map(t => t.site))];
+    const lines = [];   // {auto?, item_id?, item_no, description, unit, unit_price, qty, note}
+    const P = { service: 'treat' };
+    const body = dlg('Propose work to CDOT', `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(RMAP[region].name)} · ${nf(trees.length)} tree${trees.length > 1 ? 's' : ''} · ${sites.length > 2 ? sites.length + ' sites' : esc(sites.join(', '))}${items.length ? '' : ' · <b style="color:var(--danger)">no contract prices loaded for this region yet</b>'}</div>
+      <div class="form-grid">
+        <label>Work<select id="pp-svc">${Object.entries(SVC).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+        <label>Priority<select id="pp-pri"><option value="routine">Routine</option><option value="urgent">Urgent</option></select></label>
+        <label class="wide req">Title<input id="pp-title"></label>
+        <label class="wide req">What you found<textarea id="pp-issue" placeholder="e.g. Bagworm infestation on 12 of 14 arborvitae, heaviest on the north end"></textarea></label>
+        <label class="wide">What you recommend<textarea id="pp-rec" placeholder="e.g. Hand-remove bags, then one insecticide application in June"></textarea></label>
+      </div>
+      <div class="sec">Price</div>
+      <div id="pp-lines"></div>
+      <div class="form-grid" style="margin-top:6px">
+        <label class="wide">Add a contract item<div class="sp-wrap"><input id="pp-item" type="search" autocomplete="off" placeholder="${items.length ? 'Type to search the contract (e.g. chemical, syringing, mulch)' : 'No contract prices loaded'}" ${items.length ? '' : 'disabled'}><ul class="sp-list hidden" id="pp-item-list"></ul></div></label>
+      </div>
+      <button type="button" class="btn small" id="pp-nc" style="margin-top:6px">＋ Item not in the contract</button>
+      <div class="sec">Photos</div>
+      <input type="file" id="pp-photos" accept="image/*" multiple>
+      <div class="form-actions"><button class="btn primary" id="pp-send">Send to CDOT</button></div>`);
+    const titleAuto = () => `${SVC[$('#pp-svc').value]} — ${trees.length} tree${trees.length > 1 ? 's' : ''}, ${sites.length > 1 ? sites.length + ' sites' : sites[0]}`;
+    $('#pp-title').value = titleAuto();
+    const autoLines = () => {
+      for (let i = lines.length - 1; i >= 0; i--) if (lines[i].auto) lines.splice(i, 1);
+      const kind = $('#pp-svc').value;
+      P.unpriced = [];
+      if (kind !== 'prune' && kind !== 'remove') return;
+      const by = new Map();
+      for (const t of trees) {
+        const it = bandFor(items, kind, t.dbh);
+        if (!it) { P.unpriced.push(t); continue; }
+        by.set(it.id, (by.get(it.id) || 0) + 1);
+      }
+      for (const [id, n] of by) { const it = items.find(p => p.id === id); lines.unshift({ auto: true, item_id: it.id, item_no: it.item_no, description: it.description, unit: it.unit, unit_price: +it.unit_price, qty: n }); }
+    };
+    const draw = () => {
+      const total = lines.reduce((a, l) => a + (+l.qty || 0) * (+l.unit_price || 0), 0);
+      $('#pp-lines').innerHTML = (P.unpriced && P.unpriced.length ? `<div class="wo" style="border-color:#f5d08a;background:#fffaf0">${P.unpriced.length} tree${P.unpriced.length > 1 ? 's have' : ' has'} no DBH or no matching size in the contract (${P.unpriced.slice(0, 4).map(t => esc((t.uid || '') + ' ' + (t.dbh ? t.dbh + '″' : 'no DBH'))).join(', ')}${P.unpriced.length > 4 ? '…' : ''}). Add a line for ${P.unpriced.length > 1 ? 'them' : 'it'} below if needed.</div>` : '') +
+        (lines.length ? `<table class="lines"><thead><tr><th>Item</th><th class="r">Unit price</th><th class="r">Qty</th><th class="r">Amount</th><th></th></tr></thead><tbody>${lines.map((l, i) => `<tr>
+          <td>${l.item_id ? '' : '<span class="nc">NOT IN CONTRACT</span><br>'}${l.item_no ? '#' + esc(l.item_no) + ' ' : ''}${esc(l.description)}${l.unit ? ` <span class="muted">/ ${esc(l.unit)}</span>` : ''}</td>
+          <td class="r">${l.item_id ? money(l.unit_price) : `<input type="number" step="0.01" inputmode="decimal" data-price="${i}" value="${l.unit_price ?? ''}">`}</td>
+          <td class="r"><input type="number" step="any" inputmode="decimal" data-qty="${i}" value="${l.qty ?? ''}"></td>
+          <td class="r">${money((+l.qty || 0) * (+l.unit_price || 0))}</td>
+          <td><button type="button" class="btn small" data-del="${i}" title="Remove">×</button></td></tr>`).join('')}</tbody>
+          <tfoot><tr><td colspan="3">Total</td><td class="r">${money(total)}</td><td></td></tr></tfoot></table>` : '<div class="muted" style="font-size:13px">No line items yet — add contract items below.</div>');
+      $('#pp-lines').querySelectorAll('[data-qty]').forEach(el => el.onchange = () => { lines[+el.dataset.qty].qty = el.value === '' ? '' : +el.value; draw(); });
+      $('#pp-lines').querySelectorAll('[data-price]').forEach(el => el.onchange = () => { lines[+el.dataset.price].unit_price = el.value === '' ? '' : +el.value; draw(); });
+      $('#pp-lines').querySelectorAll('[data-del]').forEach(el => el.onclick = () => { lines.splice(+el.dataset.del, 1); draw(); });
+    };
+    $('#pp-svc').onchange = () => { const wasAuto = $('#pp-title').value === P.lastTitle || !$('#pp-title').value; autoLines(); if (wasAuto) $('#pp-title').value = titleAuto(); P.lastTitle = titleAuto(); draw(); };
+    P.lastTitle = titleAuto(); autoLines(); draw();
+    // contract item search
+    const inp = $('#pp-item'), ul = $('#pp-item-list'); let found = [];
+    inp.oninput = () => {
+      const q = inp.value.toLowerCase().split(/\s+/).filter(Boolean);
+      found = !q.length ? [] : items.filter(p => q.every(w => (p.item_no + ' ' + p.description + ' ' + p.unit).toLowerCase().includes(w))).slice(0, 12);
+      ul.innerHTML = found.length ? found.map((p, i) => `<li data-i="${i}">${p.item_no ? '#' + esc(p.item_no) + ' ' : ''}${esc(p.description)}<span class="cn">${money(p.unit_price)} / ${esc(p.unit)}</span></li>`).join('') : '<li class="none">No matching contract item</li>';
+      ul.classList.toggle('hidden', !q.length);
+      ul.querySelectorAll('li[data-i]').forEach(li => li.onmousedown = ev => {
+        ev.preventDefault(); const p = found[+li.dataset.i];
+        const perTree = /^each$/i.test(p.unit || '') ? trees.length : '';
+        lines.push({ item_id: p.id, item_no: p.item_no, description: p.description, unit: p.unit, unit_price: +p.unit_price, qty: perTree });
+        inp.value = ''; ul.classList.add('hidden'); draw();
+        setTimeout(() => { const q = $('#pp-lines').querySelector(`[data-qty="${lines.length - 1}"]`); if (q && q.value === '') q.focus(); }, 30);
+      });
+    };
+    inp.onblur = () => setTimeout(() => ul.classList.add('hidden'), 150);
+    $('#pp-nc').onclick = () => {
+      const d = (prompt('Describe the item that isn’t in the contract (CDOT will see it flagged):') || '').trim(); if (!d) return;
+      const u = (prompt('Unit (e.g. Each, Hour, Lump sum):', 'Each') || 'Each').trim();
+      lines.push({ description: d, unit: u, unit_price: '', qty: 1 }); draw();
+    };
+    $('#pp-send').onclick = async () => {
+      const title = $('#pp-title').value.trim(), issue = $('#pp-issue').value.trim();
+      if (!title || !issue) return toast('Add a title and what you found.', 3500);
+      if (lines.some(l => l.qty === '' || l.qty == null || (!l.item_id && (l.unit_price === '' || l.unit_price == null)))) return toast('Fill in the quantity (and price for non-contract items) on every line.', 4000);
+      const btn = $('#pp-send'); btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const photos = [];
+        for (const f of $('#pp-photos').files) {
+          const path = `${region}/proposals/${uid()}.jpg`;
+          const { error } = await sb.storage.from('tree-photos').upload(path, await shrink(f), { contentType: 'image/jpeg' });
+          if (error) throw error; photos.push(path);
+        }
+        const row = { region, contractor: (S.profile && S.profile.contractor) || RMAP[region].contractor, service: $('#pp-svc').value, priority: $('#pp-pri').value,
+          title, issue, recommendation: $('#pp-rec').value.trim() || null, sites,
+          trees: trees.map(t => ({ key: t.key, label: treeLabel(t), site: t.site, dbh: t.dbh ?? null, uid: t.uid || '' })),
+          lines: lines.map(({ auto, ...l }) => ({ ...l, qty: +l.qty, unit_price: l.unit_price === '' ? null : +l.unit_price })), photos, submitted_by: me_() };
+        const { data, error } = await sb.from('proposals').insert(row).select().single();
+        if (error) throw error;
+        S.proposals.unshift(data); propBadge(); closeDlg(); closeDrawer();
+        toast(`Proposal ${data.number} sent to CDOT · ${money(data.total)}`, 4000);
+      } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast('Could not send: ' + e.message, 6000); }
+    };
+  }
+  let propTab = 'open';
+  $('#btn-props').onclick = () => { propTab = 'open'; showProposals(); };
+  function showProposals() {
+    const inTab = p => propTab === 'open' ? ['submitted', 'questions'].includes(p.status) : propTab === 'approved' ? p.status === 'approved' : ['declined', 'withdrawn'].includes(p.status);
+    const list = S.proposals.filter(inTab).sort((a, b) => (b.priority === 'urgent') - (a.priority === 'urgent') || String(b.submitted_at).localeCompare(String(a.submitted_at)));
+    const cnt = k => S.proposals.filter(p => k === 'open' ? ['submitted', 'questions'].includes(p.status) : k === 'approved' ? p.status === 'approved' : ['declined', 'withdrawn'].includes(p.status)).length;
+    const body = dlg('Proposals', `<div class="tabs-mini">${[['open', 'Open'], ['approved', 'Approved'], ['closed', 'Declined / withdrawn']].map(([k, l]) => `<button data-tab="${k}" aria-pressed="${propTab === k}">${l} (${cnt(k)})</button>`).join('')}</div>
+      ${list.length ? list.map(p => `<div class="wo" data-id="${p.id}" style="cursor:pointer">
+        <div class="top"><b>${esc(p.number)}</b><span class="pill ${p.service === 'remove' ? 'remove' : p.service === 'prune' ? 'prune' : 'treat'}">${SVC[p.service]}</span>${p.priority === 'urgent' ? '<span class="pill urgent">Urgent</span>' : ''}<span class="pill ${p.status}">${PSTAT[p.status]}</span><span style="margin-left:auto;font-weight:700">${money(p.total)}</span></div>
+        <div>${esc(p.title)}</div>
+        <div class="muted">${esc(RMAP[p.region]?.name || p.region)} · ${esc(p.contractor || '')} · ${(p.trees || []).length} trees · ${new Date(p.submitted_at).toLocaleDateString()} · ${esc(p.submitted_by || '')}</div>
+      </div>`).join('') : `<div class="empty-state">${propTab === 'open' ? (isStaff() ? 'No proposals waiting.' : 'No open proposals. Open a tree and tap “Propose work”, or use “Proposal for these trees” in the filters.') : 'None.'}</div>`}`);
+    body.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { propTab = b.dataset.tab; showProposals(); });
+    body.querySelectorAll('.wo[data-id]').forEach(c => c.onclick = () => showProposal(S.proposals.find(p => p.id === c.dataset.id)));
+  }
+  async function showProposal(p) {
+    const staff = isStaff(), open = ['submitted', 'questions'].includes(p.status);
+    const body = dlg(`${p.number} · ${SVC[p.service]}`, `
+      <div class="top" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><span class="pill ${p.status}">${PSTAT[p.status]}</span>${p.priority === 'urgent' ? '<span class="pill urgent">Urgent</span>' : ''}<span class="muted">${esc(RMAP[p.region]?.name || '')} · ${esc(p.contractor || '')} · sent ${new Date(p.submitted_at).toLocaleString()} by ${esc(p.submitted_by || '')}</span></div>
+      <h3 style="margin:6px 0">${esc(p.title)}</h3>
+      <div class="sec">What they found</div><div>${esc(p.issue || '')}</div>
+      ${p.recommendation ? `<div class="sec">Recommendation</div><div>${esc(p.recommendation)}</div>` : ''}
+      <div class="sec">Price</div>
+      <table class="lines"><thead><tr><th>Item</th><th class="r">Unit price</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>${(p.lines || []).map(l => `<tr><td>${l.item_id ? '' : '<span class="nc">NOT IN CONTRACT</span><br>'}${l.item_no ? '#' + esc(l.item_no) + ' ' : ''}${esc(l.description)} <span class="muted">/ ${esc(l.unit || '')}</span></td><td class="r">${money(l.unit_price)}</td><td class="r">${nf(l.qty)}</td><td class="r">${money(l.amount)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td colspan="3">Total</td><td class="r">${money(p.total)}</td></tr></tfoot></table>
+      <div class="sec">Trees (${(p.trees || []).length})</div>
+      <div style="max-height:160px;overflow:auto;font-size:13px">${(p.trees || []).map((t, i) => `<div><a href="#" data-tree="${i}">${esc(t.uid || '')}</a> ${esc(t.label || '')}</div>`).join('')}</div>
+      <button class="btn small" id="pr-map" style="margin-top:6px">Show on map</button>
+      ${(p.photos || []).length ? `<div class="sec">Photos</div><div class="photos" id="pr-photos">${p.photos.map(() => '<a><img alt=""></a>').join('')}</div>` : ''}
+      <div class="sec">Messages</div>
+      <div id="pr-msgs">${(p.messages || []).map(m => `<div class="msg ${m.role === 'staff' ? 'staff' : ''}"><div>${esc(m.text)}</div><div class="by">${esc(m.by || '')} · ${new Date(m.at).toLocaleString()}${m.kind ? ' · ' + esc(m.kind) : ''}</div></div>`).join('') || '<div class="muted" style="font-size:13px">None yet.</div>'}</div>
+      ${p.decision_note && !open ? `<div class="muted" style="margin-top:6px">${esc(p.status === 'approved' ? 'Approved' : 'Decision')} by ${esc(p.decided_by || '')}: ${esc(p.decision_note)}</div>` : ''}
+      ${open ? `<textarea id="pr-text" placeholder="${staff ? 'Question or note for the contractor' : 'Reply to CDOT'}" style="margin-top:8px"></textarea>` : ''}
+      <div class="form-actions" style="flex-wrap:wrap">
+        <button class="btn" id="pr-print">Print / PDF</button><span style="flex:1"></span>
+        ${open && staff ? '<button class="btn" id="pr-ask">Ask a question</button><button class="btn danger" id="pr-decline">Decline</button><button class="btn primary" id="pr-approve">Approve</button>' : ''}
+        ${open && !staff ? '<button class="btn danger" id="pr-withdraw">Withdraw</button><button class="btn primary" id="pr-reply">Send reply</button>' : ''}
+      </div>`);
+    if ((p.photos || []).length) {
+      const { data } = await sb.storage.from('tree-photos').createSignedUrls(p.photos, 3600);
+      (data || []).forEach((x, i) => { const a = $('#pr-photos')?.children[i]; if (a && x.signedUrl) { a.href = x.signedUrl; a.target = '_blank'; a.firstChild.src = x.signedUrl; } });
+    }
+    const say = (text, kind) => ({ by: me_(), role: staff ? 'staff' : 'contractor', at: new Date().toISOString(), text, kind });
+    const save = async (upd, msg) => {
+      const { data, error } = await sb.from('proposals').update(upd).eq('id', p.id).select().single();
+      if (error) { toast(error.message, 5000); return false; }
+      Object.assign(p, data || upd); propBadge(); if (msg) toast(msg); showProposal(p); return true;
+    };
+    const txt = () => ($('#pr-text')?.value || '').trim();
+    body.querySelectorAll('[data-tree]').forEach(a => a.onclick = ev => { ev.preventDefault(); const t0 = p.trees[+a.dataset.tree]; showOrderTree({ tree_key: t0.key, region: p.region }); });
+    $('#pr-map').onclick = async () => {
+      closeDlg(); if (S.region !== 'all' && S.region !== p.region) { S.region = p.region; renderRegions(); await refresh(); }
+      const pts = p.trees.map(t => allTrees.find(x => x.key === t.key)).filter(t => t && t.lat != null).map(t => [t.lat, t.lng]);
+      setView('map'); if (pts.length && map) map.fitBounds(pts, { padding: [40, 40], maxZoom: 19 });
+    };
+    $('#pr-print').onclick = () => printProposal(p);
+    const ask = $('#pr-ask'); if (ask) ask.onclick = () => { if (!txt()) return toast('Type your question first.'); save({ status: 'questions', messages: [...(p.messages || []), say(txt(), 'question')] }, 'Question sent to the contractor.'); };
+    const dec = $('#pr-decline'); if (dec) dec.onclick = () => { const note = txt() || prompt('Reason for declining (the contractor will see this):') || ''; if (!note.trim()) return; save({ status: 'declined', decided_by: me_(), decided_at: new Date().toISOString(), decision_note: note.trim(), messages: [...(p.messages || []), say(note.trim(), 'declined')] }, 'Proposal declined.'); };
+    const apv = $('#pr-approve'); if (apv) apv.onclick = async () => {
+      const wt = { treat: 'treat', prune: 'prune', remove: 'remove', plant: 'other', other: 'other' }[p.service];
+      if (!confirm(`Approve ${p.number} (${money(p.total)}) and issue ${p.trees.length} work order${p.trees.length > 1 ? 's' : ''} to ${p.contractor || 'the contractor'}?`)) return;
+      apv.disabled = true;
+      const rows = p.trees.map(t => ({ tree_key: t.key, site: t.site, tree_label: t.label, type: wt, priority: p.priority, event: p.number,
+        details: `${p.title}${p.recommendation ? ' — ' + p.recommendation : ''} (approved proposal ${p.number})`, created_by: me_(), proposal_id: p.id }));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await sb.from('work_orders').insert(rows.slice(i, i + 200));
+        if (error) { apv.disabled = false; return toast('Could not create work orders: ' + error.message, 6000); }
+      }
+      const note = txt();
+      await save({ status: 'approved', decided_by: me_(), decided_at: new Date().toISOString(), decision_note: note || null, messages: [...(p.messages || []), say(note || `Approved · ${rows.length} work order${rows.length > 1 ? 's' : ''} issued`, 'approved')] }, `Approved · ${rows.length} work orders issued.`);
+      await loadOrders(); renderView();
+    };
+    const rep_ = $('#pr-reply'); if (rep_) rep_.onclick = () => { if (!txt()) return toast('Type a reply first.'); save({ status: 'submitted', messages: [...(p.messages || []), say(txt(), 'reply')] }, 'Reply sent to CDOT.'); };
+    const wd = $('#pr-withdraw'); if (wd) wd.onclick = () => { if (!confirm('Withdraw this proposal?')) return; save({ status: 'withdrawn', messages: [...(p.messages || []), say(txt() || 'Withdrawn by contractor', 'withdrawn')] }, 'Proposal withdrawn.'); };
+  }
+  function printProposal(p) {
+    const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print.');
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(p.number)} ${esc(p.title)}</title><style>
+      body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17201b;margin:36px;font-size:13px} h1{font-size:20px;margin:0 0 4px} .muted{color:#5d6761}
+      table{width:100%;border-collapse:collapse;margin:10px 0} th,td{border-bottom:1px solid #dde2dc;padding:6px;text-align:left;vertical-align:top} th{font-size:11px;text-transform:uppercase;color:#5d6761}
+      .r{text-align:right;white-space:nowrap} tfoot td{font-weight:700;border:0} h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#5d6761;margin:18px 0 4px}
+      .sig{display:flex;gap:40px;margin-top:40px}.sig div{flex:1;border-top:1px solid #17201b;padding-top:4px}.nc{color:#8a5a00;font-weight:700;font-size:10px}
+      @media print{body{margin:14mm}}</style></head><body>
+      <div class="muted">Chicago Department of Transportation · Landscape — Arborist</div>
+      <h1>Proposal ${esc(p.number)}: ${esc(p.title)}</h1>
+      <div class="muted">${esc(RMAP[p.region]?.name || '')} region · ${esc(p.contractor || '')} · ${SVC[p.service]}${p.priority === 'urgent' ? ' · URGENT' : ''} · submitted ${new Date(p.submitted_at).toLocaleDateString()} by ${esc(p.submitted_by || '')} · status: ${PSTAT[p.status]}</div>
+      <h2>Findings</h2><div>${esc(p.issue || '')}</div>
+      ${p.recommendation ? `<h2>Recommendation</h2><div>${esc(p.recommendation)}</div>` : ''}
+      <h2>Price (contract unit prices)</h2>
+      <table><thead><tr><th>Item</th><th>Description</th><th>Unit</th><th class="r">Unit price</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>
+      ${(p.lines || []).map(l => `<tr><td>${esc(l.item_no || '')}</td><td>${l.item_id ? '' : '<span class="nc">NOT IN CONTRACT</span> '}${esc(l.description)}</td><td>${esc(l.unit || '')}</td><td class="r">${money(l.unit_price)}</td><td class="r">${nf(l.qty)}</td><td class="r">${money(l.amount)}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="5">Total</td><td class="r">${money(p.total)}</td></tr></tfoot></table>
+      <h2>Trees (${(p.trees || []).length})</h2>
+      <table><thead><tr><th>Tree ID</th><th>Tree</th><th>Site</th><th class="r">DBH</th></tr></thead><tbody>${(p.trees || []).map(t => `<tr><td>${esc(t.uid || '')}</td><td>${esc(t.label || '')}</td><td>${esc(t.site || '')}</td><td class="r">${t.dbh ?? ''}</td></tr>`).join('')}</tbody></table>
+      ${p.decided_by ? `<h2>Decision</h2><div>${PSTAT[p.status]} by ${esc(p.decided_by)} on ${new Date(p.decided_at).toLocaleDateString()}${p.decision_note ? ': ' + esc(p.decision_note) : ''}</div>` : ''}
+      <div class="sig"><div>Contractor</div><div>CDOT approval</div><div>Date</div></div>
+      <script>setTimeout(()=>print(),300)<\/script></body></html>`);
+    w.document.close();
+  }
 
   // ---------- Generic dialog ----------
   function dlg(title, html) { $('#dlg-title').textContent = title; $('#dlg-body').innerHTML = html; $('#dlg').classList.remove('hidden'); return $('#dlg-body'); }
@@ -2398,6 +2739,7 @@
     $('#btn-people').classList.toggle('hidden', S.local || !S.profile || !isStaff());
     $('#btn-orders').classList.toggle('hidden', S.local);
     $('#f-orders').classList.toggle('hidden', S.local || !isStaff());
+    $('#f-prop').classList.toggle('hidden', S.local);
     if (S.local) {
       $('#banner').classList.remove('hidden');
       $('#banner').textContent = sb ? 'Viewing on this device only. Sign in to save reports and notes.' : 'Not connected to a database yet — imported reports are shown on this device only. Add your Supabase details to config.js to save and share them.';
@@ -2423,7 +2765,7 @@
     await loadProfile();
     if (S.profile && S.profile.role === 'pending') { $('#login').classList.add('hidden'); $('#pending').classList.remove('hidden'); $('#btn-signout').classList.remove('hidden'); return; }
     enterApp(false);
-    await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders(), loadInventory()]);
+    await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders(), loadInventory(), loadPrices(), loadProposals()]);
     if (S.region !== 'all' && !myRegions().includes(S.region)) S.region = 'all';
     renderRegions(); await refresh(true);
     openFromLink();

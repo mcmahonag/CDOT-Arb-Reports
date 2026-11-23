@@ -27,6 +27,7 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `supabase/005_work_orders.sql` | Work orders and the completion function that updates reports |
 | `supabase/006_tree_ids.sql` | Permanent citywide tree IDs (T-10001…) and moves locations, notes, photos and orders onto them |
 | `supabase/007_inventory.sql` | New GPS inventory table |
+| `supabase/008_proposals.sql` | Contract price sheets and contractor proposals |
 
 ## Setup (about 15 minutes)
 
@@ -63,8 +64,9 @@ In Supabase → SQL Editor, run each file from the `supabase` folder:
 3. `005_work_orders.sql`
 4. `006_tree_ids.sql`: gives every tree already in the database a permanent ID.
 5. `007_inventory.sql`
+6. `008_proposals.sql`
 
-For a brand-new database, run `schema.sql`, then 004 through 007. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
+For a brand-new database, run `schema.sql`, then 004 through 008. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
 
 ## Roles
 
@@ -114,4 +116,22 @@ Saving an inventory tree also sets that tree ID's location everywhere, so linked
 ## Help page
 
 The **?** button in the header opens a how-to and FAQ written for contractors: getting started, field reports, work orders, GPS locations, the inventory, and fixes for common problems. Staff also see a section with their own tools. It has a search box, and `https://mcmahonag.github.io/CDOT-Arb-Reports/?help` opens it directly, even before signing in, so you can text or email that link. Put a contact name and number in `HELP_CONTACT` in `config.js` to show it at the bottom.
+
+## Contract prices and proposals
+
+**Contract prices (staff):** go to **Reports → Contract prices → Import** for each region. Paste the rows from the price sheet (Item No. | Description | Unit Price | Unit) or choose the Excel file. Importing again replaces that region's sheet, and proposals already sent keep their prices. Pruning and removal items with a size range in the description (e.g. `TREE PRUNING 13-26 IN. CALIPER`, `TREE REMOVAL - OVER 45" DBH`) are used to price trees by DBH automatically.
+
+**Proposals (contractor → CDOT):**
+1. **Start one:** open a tree and choose **Propose work**, or filter to a set of trees and choose **Proposal for these trees**.
+2. **Fill it in:** pick the work, describe what was found and what you recommend, and add photos.
+3. **Price it:**
+   - **Pruning and removal** price themselves from each tree's DBH. Trees outside the contract sizes are flagged.
+   - **Other work:** search the contract (e.g. "chemical application") and enter hours, pounds or each.
+   - **Items not in the contract** can be added. They're clearly flagged.
+   - **Prices always come from the sheet.** The database recomputes every proposal, so rates can't be changed.
+4. **Send it:** **Send to CDOT** puts it on CDOT's **Proposals** badge.
+
+**Review (staff):** **Approve** issues a work order for each tree, linked back to the proposal. **Decline** takes a note, and **Ask a question** sends it back to the contractor, who sees a badge and can reply or withdraw. **Print / PDF** produces a signed-off copy for purchasing.
+
+Alerts are in the app only. Email notifications can be added later by connecting an email service to Supabase.
 
