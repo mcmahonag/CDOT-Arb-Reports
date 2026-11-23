@@ -194,6 +194,18 @@
   .muted { color: var(--ink-3); }
   .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: #fff; color: var(--brand); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
   .badge.urgent { background: #e5484d; color: #fff; }
+  .dot.inv { background: #16a34a; border-radius: 2px; box-shadow: 0 0 0 1.5px #064e1f; }
+  .inv-drop { width: 100%; padding: 14px; font-size: 16px; font-weight: 650; border-radius: 12px; }
+  .form-grid label.req { position: relative; }
+  .form-grid label.req::after { content: '*'; color: var(--danger); position: absolute; top: -1px; right: 2px; font-weight: 700; }
+  .survey .s-row { min-width: 0; flex-wrap: wrap; }
+  .survey .s-row > select { min-width: 0; flex: 1 1 140px; }
+  .survey .s-row > #i-reg { flex: 0 0 auto; }
+  .survey .s-row > input { min-width: 0; flex: 1 1 120px; }
+  .survey .s-row > .btn { flex: none; }
+  .sugg { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; margin-bottom: 6px; font-size: 13px; cursor: pointer; background: #fff; width: 100%; text-align: left; }
+  .sugg.on { border-color: #16a34a; background: #effaf2; }
+  .sugg .d { margin-left: auto; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
   .dot.order { border: 2.5px solid #e5484d; background: transparent; width: 13px; height: 13px; }
   .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #eef0ec; color: var(--ink-2); white-space: nowrap; }
   .pill.draft { background: #e8f0fe; color: #1a56c4; } .pill.submitted { background: #e6f4ea; color: #137333; }
@@ -392,8 +404,10 @@
       <div class="map-tools" id="map-tools">
         <button class="btn small hidden" id="btn-survey">📍 Survey locations</button>
         <button class="btn small hidden" id="btn-addtree">＋ Add tree</button>
+        <button class="btn small hidden" id="btn-inv">🌳 New inventory</button>
       </div>
       <div class="survey hidden" id="survey"></div>
+      <div class="survey hidden" id="inv"></div>
       <div class="crosshair hidden" id="crosshair">＋</div>
       <div class="adjust hidden" id="adjust">
         <div><b>Adjust location</b> <span id="adj-name"></span><div class="muted" style="font-size:12px">Drag the pin to the tree, then save. Switch to Satellite (top right) to see the median.</div></div>
@@ -405,6 +419,7 @@
         <div><span class="dot issue"></span>Tree with condition noted</div>
         <div><span class="dot vacant"></span>Vacant / removed</div>
         <div><span class="dot order"></span>Open work order</div>
+        <div class="inv-key hidden"><span class="dot inv"></span>New inventory (GPS) <label style="margin-left:auto;font-size:11px"><input type="checkbox" id="inv-show" checked> show</label></div>
         <div class="lg-note" id="legend-note">Placed on City street centerlines from each report address. Drag-adjusted spots are exact.</div>
       </div>
     </section>
@@ -477,6 +492,7 @@
     profile: null,            // {role, regions, contractor} — null before migration 004 (everyone is staff)
     orders: [],               // work orders (open + recent)
     openOrders: new Map(),    // tree_key -> [open orders]
+    inv: [],                  // new GPS inventory rows
     tableLimit: 300,
     filtered: [],
   };
@@ -558,7 +574,7 @@
     for (const r of REGIONS) {
       if (S.region !== 'all' && S.region !== r.id) continue;
       if (!myRegions().includes(r.id)) continue;
-      const list = S.reports.filter(x => x.region === r.id).sort((a, b) => b.month.localeCompare(a.month));
+      const list = S.reports.filter(x => x.region === r.id).sort((a, b) => b.month.localeCompare(a.month) || (b.source === 'inventory') - (a.source === 'inventory'));
       const pick = S.month === 'latest' ? list[0] : list.find(x => x.month === S.month);
       if (pick) out.push(pick);
     }
@@ -809,6 +825,15 @@
       m.on('click', () => { lastDotClick = Date.now(); survey ? surveySelect(t) : openTree(t); });
       markers.addLayer(m); pts.push([t.lat, t.lng]);
     }
+    if (S.inv.length && $('#inv-show').checked) {
+      for (const v of invVisible()) {
+        if (v.lat == null || v.status === 'not_found') continue;
+        const m = L.circleMarker([v.lat, v.lng], { renderer, radius: TOUCH ? 7.5 : 6, weight: 2, color: '#064e1f', fillColor: v.status === 'vacant' ? '#ffffff' : '#16a34a', fillOpacity: 1 });
+        m.bindTooltip(`<b>${esc(v.genus ? v.genus + ' ' + (v.species || '') : v.status === 'vacant' ? 'Vacant' : 'Tree')}</b>${v.dbh ? ' · ' + v.dbh + '"' : ''}<br>${esc(v.site)}${v.position ? ' #' + esc(v.position) : ''} · inventory`, { direction: 'top', offset: [0, -4] });
+        m.on('click', () => { lastDotClick = Date.now(); invForm(v); });
+        markers.addLayer(m); if (!pts.length) pts.push([v.lat, v.lng]);
+      }
+    }
     if ((fit || !renderMap.fitted) && pts.length) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 17 }); renderMap.fitted = true; }
   }
   const cssCache = {};
@@ -954,6 +979,7 @@
         ${row('Status', t.status === 'tree' ? 'Tree' : t.status === 'vacant' ? 'Vacant (no tree)' : t.status === 'removed' ? 'Removed' : 'Needs species')}
         ${row('Species code', esc(t.code))}
         ${row('DBH', t.dbh != null ? t.dbh + ' in' : '')}
+        ${row('Condition', esc(t.condition ? t.condition[0].toUpperCase() + t.condition.slice(1) : ''))}
         ${row('Planter / tree no.', esc([t.planter && 'Planter ' + t.planter, t.treeNo && 'Tree ' + t.treeNo].filter(Boolean).join(' · ')))}
         ${row('Side', esc(t.side))}
         ${row('Cross street', esc(t.cross))}
@@ -1059,7 +1085,7 @@
 
   // ---------- Adjust location ----------
   let adj = null;
-  function startAdjust(t) {
+  function startAdjust(t, onSave) {
     if (S.locsMissing) return toast('Run supabase/002_tree_locations.sql in Supabase first to enable saved locations.', 6000);
     closeDrawer(); setView('map');
     setTimeout(() => {
@@ -1067,17 +1093,18 @@
       map.setView([t.lat, t.lng], 19);
       if (adj) adj.marker.remove();
       const marker = L.marker([t.lat, t.lng], { draggable: true, autoPan: true }).addTo(map);
-      adj = { t, marker };
+      adj = { t, marker, onSave };
       $('#adj-name').textContent = '· ' + speciesName(t) + ' at ' + addr(t);
       $('#adj-reset').classList.toggle('hidden', !S.locs.has(t.key));
       $('#adjust').classList.remove('hidden');
     }, 50);
   }
-  function endAdjust() { if (adj) adj.marker.remove(); adj = null; $('#adjust').classList.add('hidden'); }
+  function endAdjust() { if (adj) adj.marker.remove(); adj = null; $('#adjust').classList.add('hidden'); if (invPanel) { $('#inv').classList.remove('hidden'); renderInv(); } }
   $('#adj-cancel').onclick = endAdjust;
   $('#adj-save').onclick = async () => {
     if (!adj) return;
     const ll = adj.marker.getLatLng(), t = adj.t;
+    if (adj.onSave) { if (await adj.onSave(ll)) { endAdjust(); renderMap(); } return; }
     if (!(await saveLoc(t, ll.lat, ll.lng, 'map', null))) return;
     endAdjust(); renderMap(); toast('Location saved. It stays put in future reports.');
   };
@@ -1198,14 +1225,16 @@
     document.querySelector('#import .actions').classList.toggle('hidden', !staff);
     const list = [...S.reports].filter(r => myRegions().includes(r.region)).sort((a, b) => a.region.localeCompare(b.region) || b.month.localeCompare(a.month));
     const thisMonth = ym(new Date());
-    const startable = S.local ? [] : myRegions().filter(rg => !S.reports.some(r => r.region === rg && r.month === thisMonth));
+    const startable = S.local ? [] : myRegions().filter(rg => !S.reports.some(r => r.region === rg && r.month === thisMonth && r.source !== 'inventory'));
     const statusPill = r => r.status === 'draft' ? '<span class="pill draft">Draft · in progress</span>' : r.status === 'submitted' ? `<span class="pill submitted">Submitted${r.submitted_by ? ' · ' + esc(r.submitted_by) : ''}</span>` : '';
+    const invRegs = staff && !S.local ? REGIONS.map(r => r.id).filter(rg => S.inv.some(v => v.region === rg)) : [];
     $('#imp-existing').innerHTML =
+      (invRegs.length ? `<div class="rep-list"><h3>New GPS inventory</h3>` + invRegs.map(rg => { const all = S.inv.filter(v => v.region === rg); return `<div class="rep-row"><div><b>${esc(RMAP[rg].name)}</b> · ${nf(all.filter(v => v.status !== 'not_found').length)} trees collected · ${new Set(all.map(v => v.site)).size} sites${all.some(v => v.status === 'not_found') ? ' · ' + all.filter(v => v.status === 'not_found').length + ' not found' : ''}</div><button class="btn small primary" data-pub="${rg}">Publish as report</button></div>`; }).join('') + '</div>' : '') +
       (startable.length ? `<div class="rep-list"><h3>Field reports</h3><div class="muted" style="font-size:12px;margin-bottom:6px">Starts this month's report from the latest one, ready to update tree by tree in the field.</div>` +
         startable.map(rg => `<div class="rep-row"><div><b>${esc(RMAP[rg].name)}</b> · ${esc(fmtMonth(thisMonth))}</div><button class="btn small primary" data-start="${rg}">Start field report</button></div>`).join('') + '</div>' : '') +
       (!list.length ? '' : `<div class="rep-list"><h3>Reports</h3>` + list.map((r, i) => `
       <div class="rep-row" style="flex-wrap:wrap"><div style="min-width:0;flex:1"><b>${esc(RMAP[r.region]?.name || r.region)}</b> · ${esc(fmtMonth(r.month))} · ${nf(r.tree_count ?? (r.trees || []).length)} rows ${statusPill(r)}
-      <div class="fn">${esc(r.source === 'field' ? 'Field report' : (r.file_name || ''))}${r.id ? '' : ' · this device only'}</div></div>
+      <div class="fn">${esc(r.source === 'field' ? 'Field report' : r.source === 'inventory' ? 'GPS inventory' : (r.file_name || ''))}${r.id ? '' : ' · this device only'}</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn small" data-xls="${i}">Excel</button>
         ${r.status === 'draft' && canEditReport(r) ? `<button class="btn small primary" data-submit="${i}">Submit</button>` : ''}
@@ -1218,6 +1247,7 @@
     q('button[data-submit]').forEach(b => b.onclick = () => submitReport(list[+b.dataset.submit]));
     q('button[data-reopen]').forEach(b => b.onclick = () => reopenReport(list[+b.dataset.reopen]));
     q('button[data-start]').forEach(b => b.onclick = () => startFieldReport(b.dataset.start, thisMonth, b));
+    q('button[data-pub]').forEach(b => b.onclick = () => publishInventory(b.dataset.pub, b));
   }
   async function deleteReport(r, btn) {
     const label = `${RMAP[r.region]?.name || r.region} ${fmtMonth(r.month)}`;
@@ -1258,7 +1288,7 @@
     $('#imp-local').disabled = !ok;
     $('#imp-save').disabled = !ok || S.local || !S.user;
     $('#imp-save').title = S.local ? 'Not connected to a database (fill in config.js)' : '';
-    const exists = pending.filter(p => S.reports.some(r => r.region === p.region && r.month === p.month && r.id));
+    const exists = pending.filter(p => S.reports.some(r => r.region === p.region && r.month === p.month && r.id && r.source !== 'inventory' && r.source !== 'field'));
     $('#imp-msg').textContent = !pending.length ? '' : !ok ? 'Pick a region and month for each file.' : exists.length ? `${exists.length} will replace an existing report for the same region and month.` : '';
   }
   async function parsePending() {
@@ -1313,7 +1343,7 @@
       for (const p of pending) {
         const rep = finalize(p);
         p.status = 'Saving…'; p.error = ''; renderPending();
-        const old = S.reports.find(r => r.region === rep.region && r.month === rep.month && r.id);
+        const old = S.reports.find(r => r.region === rep.region && r.month === rep.month && r.id && r.source !== 'inventory' && r.source !== 'field');
         if (old) { const { error } = await sb.from('reports').delete().eq('id', old.id); if (error) throw error; }
         const { trees, ...meta } = rep;
         const { data: saved, error } = await sb.from('reports').insert(meta).select().single();
@@ -1342,8 +1372,11 @@
   // ---------- Map tools ----------
   function updateMapTools() {
     const reps = activeReports();
+    $('#map-tools').classList.toggle('hidden', !!invPanel);
     $('#btn-survey').classList.toggle('hidden', S.local || !navigator.geolocation || !reps.some(r => canEditLocs(r.region)) || !!survey);
     $('#btn-addtree').classList.toggle('hidden', S.local || !reps.some(canEditReport));
+    $('#btn-inv').classList.toggle('hidden', S.local || S.invMissing || !navigator.geolocation || !myRegions().length || !!invPanel);
+    document.querySelector('.inv-key').classList.toggle('hidden', !S.inv.length);
   }
 
   // ---------- Location survey ----------
@@ -1463,10 +1496,10 @@
       trees.forEach(place);
       const HEAD = ['Dir.', 'Address', 'Dir.', 'From: To:', 'Planter', 'No.', 'Direction', 'Genus', 'Species', 'Variety / Cultivar', 'DBH', 'Species Code', 'Pruning',
         'Deadwood Percentage', 'Trunk Wounds/Injury', 'Pests-Disease', 'Pest Treatment Applied', 'Product Used', 'Tree Removed', 'Reason', 'Tree Planted', 'Lean',
-        'ISA Hazardous rating 1 - 4', 'Comments', 'Tree Prune Category', 'Tree Removal Category', 'ID Code', 'Tree ID', 'Latitude', 'Longitude', 'Location source', 'Inspected by', 'Inspected on'];
+        'ISA Hazardous rating 1 - 4', 'Comments', 'Tree Prune Category', 'Tree Removal Category', 'ID Code', 'Tree ID', 'Condition', 'Latitude', 'Longitude', 'Location source', 'Inspected by', 'Inspected on'];
       const rowOf = t => [t.gridRaw ?? t.gNum ?? '', t.gridDirRaw || t.gDir || '', t.address, t.addrDir, t.cross, t.planter, t.treeNo, t.side,
         t.status === 'vacant' || t.status === 'removed' ? (t.genus ? t.genus : 'NO TREE') : t.genus, t.species, t.cultivar, t.dbh ?? '', t.code, t.pruned,
-        t.deadwood ?? '', t.wounds, t.pests, t.treated, t.product, t.removed, t.reason, t.planted, t.lean, t.hazard ?? '', t.comments, t.pruneCat, t.removalCat, t.id, t.uid || '',
+        t.deadwood ?? '', t.wounds, t.pests, t.treated, t.product, t.removed, t.reason, t.planted, t.lean, t.hazard ?? '', t.comments, t.pruneCat, t.removalCat, t.id, t.uid || '', t.condition || '',
         t.lat ?? '', t.lng ?? '', { gps: 'GPS', manual: 'Map', centerline: 'Street centerline', snapped: 'Street (snapped)', approx: 'Approximate' }[t.how] || '',
         t.inspectedBy || '', t.inspectedAt ? t.inspectedAt.slice(0, 10) : ''];
       const so = x => x.seq != null ? x.seq : (parseFloat(x.planter) || 0) * 1000 + (parseFloat(x.treeNo) || 0);
@@ -1491,6 +1524,286 @@
       XLSX.writeFile(wb, fname);
     } catch (e) { toast('Excel export failed: ' + (e && e.message || 'spreadsheet library did not load'), 5000); }
     finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
+  }
+
+  // ---------- New GPS inventory ----------
+  // Walk a site and drop each tree at its GPS position; required: site + position, species, DBH, condition, photo.
+  // Old report records nearby are suggested so one tap keeps their ID and history.
+  let invPanel = null;
+  async function loadInventory() {
+    if (S.local) return;
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from('inventory_trees').select('*').order('collected_at').range(from, from + 999);
+      if (error) { S.invMissing = true; return; }
+      out.push(...data); if (data.length < 1000) break;
+    }
+    S.inv = out;
+  }
+  const invVisible = () => S.inv.filter(v => (S.region === 'all' || v.region === S.region) && myRegions().includes(v.region));
+  $('#inv-show').onchange = () => renderMap();
+  $('#btn-inv').onclick = () => openInv();
+  function invSites(region) {
+    const set = new Set();
+    allTrees.filter(t => t.region === region).forEach(t => set.add(t.site));
+    S.inv.filter(v => v.region === region).forEach(v => set.add(v.site));
+    return [...set].sort();
+  }
+  function openInv() {
+    closeDrawer(); if (survey) closeSurvey();
+    const regs = myRegions(); if (!regs.length) return;
+    const cur = openKey && allTrees.find(t => t.key === openKey);
+    const region = S.region !== 'all' && regs.includes(S.region) ? S.region : (cur ? cur.region : regs[0]);
+    invPanel = { region, site: cur ? cur.site : (invSites(region)[0] || ''), planter: '', reads: [], watch: null };
+    invPanel.watch = navigator.geolocation.watchPosition(p => {
+      if (!invPanel) return;
+      invPanel.reads.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() });
+      if (invPanel.reads.length > 60) invPanel.reads.shift();
+      showMe(p); invGpsBadge();
+    }, e => { if (invPanel) { invPanel.gpsErr = e.code === 1 ? 'Location permission is off for this site' : e.message; invGpsBadge(); } },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
+    setView('map'); $('#inv').classList.remove('hidden'); $('.legend').classList.add('hidden'); updateMapTools();
+    renderInv();
+  }
+  function closeInv() {
+    if (!invPanel) return;
+    navigator.geolocation.clearWatch(invPanel.watch); invPanel = null;
+    if (me && meWatch == null) { me.ring.remove(); me.dot.remove(); me = null; }
+    $('#inv').classList.add('hidden'); $('.legend').classList.remove('hidden'); updateMapTools(); renderMap();
+  }
+  function invFix() {
+    if (!invPanel || !invPanel.reads.length) return null;
+    const now = Date.now(); let r = invPanel.reads.filter(x => now - x.at < 6000);
+    if (!r.length) r = invPanel.reads.filter(x => now - x.at < 20000);
+    return r.length ? bestFix(r) : null;
+  }
+  function invGpsBadge() {
+    const el = $('#i-gps'); if (!el || !invPanel) return;
+    const f = invFix(), q = !f ? 'none' : f.acc <= 5 ? 'good' : f.acc <= GOOD_M ? 'ok' : 'poor';
+    el.className = 's-gps ' + q;
+    el.textContent = invPanel.gpsErr && !f ? invPanel.gpsErr : f ? `GPS ±${Math.round(f.acc)} m` : 'Waiting for GPS…';
+  }
+  function nextPosition(region, site, planter) {
+    const n = S.inv.filter(v => v.region === region && v.site === site && (v.planter || '') === (planter || '')).map(v => parseInt(v.position) || 0);
+    return String((n.length ? Math.max(...n) : 0) + 1);
+  }
+  function renderInv() {
+    if (!invPanel) return;
+    const P = invPanel, sites = invSites(P.region);
+    const here = S.inv.filter(v => v.region === P.region && v.site === P.site).sort((a, b) => String(b.collected_at).localeCompare(String(a.collected_at)));
+    const old = allTrees.filter(t => t.region === P.region && t.site === P.site && t.status !== 'removed');
+    const linked = new Set(S.inv.filter(v => v.tree_uid).map(v => v.tree_uid));
+    const oldLeft = old.filter(t => !linked.has(t.uid || t.key));
+    const cond = c => c ? c[0].toUpperCase() + c.slice(1) : '';
+    $('#inv').innerHTML = `<div class="s-head">
+        <div class="s-row">${myRegions().length > 1 ? `<select id="i-reg">${myRegions().map(r => `<option value="${r}" ${r === P.region ? 'selected' : ''}>${esc(RMAP[r].name)}</option>`).join('')}</select>` : ''}
+          <select id="i-site">${sites.map(x => `<option ${x === P.site ? 'selected' : ''}>${esc(x)}</option>`).join('')}<option value="__new">New site…</option></select><button class="btn small" id="i-close">Done</button></div>
+        <div class="s-row"><input id="i-planter" placeholder="Planter / row (optional)" value="${esc(P.planter)}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:0"><span id="i-gps" class="s-gps none">Waiting for GPS…</span></div>
+        <button class="btn primary inv-drop" id="i-drop">📍 Drop tree here</button>
+        <div class="s-row" style="font-size:12px"><span class="muted">${here.filter(v => v.status !== 'not_found').length} collected on this site${old.length ? ` · ${old.length - oldLeft.length} of ${old.length} old records linked` : ''}</span>
+          <button class="btn small" id="i-center" style="margin-left:auto" title="Place at the red cross in the middle of the map">Use map center</button></div>
+      </div>
+      <div class="s-list">
+        ${oldLeft.length && here.length ? `<button class="btn small" id="i-review" style="margin-bottom:8px">Old records not linked yet (${oldLeft.length})</button>` : ''}
+        ${here.map(v => `<div class="scard ${v.status === 'not_found' ? '' : 'done'}" data-id="${v.id}">
+          <div style="min-width:0"><b>${v.position ? '#' + esc(v.position) + ' ' : ''}${esc(v.status === 'not_found' ? 'Not found' : v.status === 'vacant' ? 'Vacant spot' : ((v.genus || '') + ' ' + (v.species || '')).trim() || 'Tree')}</b>${v.dbh ? ' · ' + v.dbh + '″' : ''}${v.condition ? ' · ' + cond(v.condition) : ''}
+            <div class="meta">${v.tree_uid ? esc(v.tree_uid) + (v.linked ? ' (linked)' : '') + ' · ' : ''}${v.planter ? 'P' + esc(v.planter) + ' · ' : ''}${v.accuracy_m != null ? '±' + Math.round(v.accuracy_m) + ' m' : ''}${v.loc_source === 'map' ? ' · nudged' : ''}${v.photo_path ? ' · 📷' : ''}</div></div>
+          ${v.status !== 'not_found' && v.lat != null ? `<button class="btn small" data-nudge="${v.id}" title="Drag on the map">Nudge</button>` : ''}
+          <button class="btn small" data-edit="${v.id}">Edit</button></div>`).join('') || '<div class="empty-state" style="padding:20px 10px">Stand at the first tree and tap <b style="display:inline">Drop tree here</b>.</div>'}
+      </div>`;
+    invGpsBadge();
+    $('#i-close').onclick = closeInv;
+    const rg = $('#i-reg'); if (rg) rg.onchange = () => { P.region = rg.value; P.site = invSites(P.region)[0] || ''; renderInv(); };
+    $('#i-site').onchange = e => {
+      if (e.target.value === '__new') { const n = (prompt('New site name (e.g. "Halsted - 103rd to 95th")') || '').trim(); if (n) P.site = n; }
+      else P.site = e.target.value;
+      renderInv();
+      const pts = allTrees.filter(t => t.region === P.region && t.site === P.site && t.lat != null).map(t => [t.lat, t.lng]);
+      if (pts.length && map) map.fitBounds(pts, { padding: [30, 30], maxZoom: 18 });
+    };
+    $('#i-planter').onchange = e => { P.planter = e.target.value.trim(); };
+    $('#i-drop').onclick = () => {
+      const f = invFix(); if (!f) return toast(P.gpsErr || 'Waiting for a GPS fix…', 3000);
+      if (!P.site) return toast('Pick or name a site first.');
+      if (f.acc > GOOD_M && !confirm(`GPS accuracy is ±${Math.round(f.acc)} m right now. Use it anyway? You can nudge it on the map afterwards.`)) return;
+      invForm(null, { lat: f.lat, lng: f.lng, acc: f.acc, src: 'gps' });
+    };
+    $('#i-center').onclick = () => {
+      if ($('#crosshair').classList.contains('hidden')) { $('#crosshair').classList.remove('hidden'); return toast('Center the red cross on the tree, then tap “Drop at map center” again.', 4000); }
+      const c = map.getCenter(); $('#crosshair').classList.add('hidden');
+      invForm(null, { lat: c.lat, lng: c.lng, acc: null, src: 'map' });
+    };
+    const rv = $('#i-review'); if (rv) rv.onclick = () => invReview(oldLeft);
+    const byId = id => S.inv.find(v => v.id === id);
+    $('#inv').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => invForm(byId(b.dataset.edit)));
+    $('#inv').querySelectorAll('[data-nudge]').forEach(b => b.onclick = () => invNudge(byId(b.dataset.nudge)));
+  }
+  function distM(a, b) { const k = Math.cos(a[0] * Math.PI / 180); return Math.hypot((a[0] - b[0]) * 110574, (a[1] - b[1]) * 111320 * k); }
+  function invSuggestions(region, site, pos, exceptUid) {
+    const linked = new Set(S.inv.filter(v => v.tree_uid && v.tree_uid !== exceptUid).map(v => v.tree_uid));
+    return allTrees.filter(t => t.region === region && t.status !== 'removed' && !linked.has(t.uid || t.key) && (t.site === site || (t.lat != null && pos && distM([t.lat, t.lng], [pos.lat, pos.lng]) < 40)))
+      .map(t => ({ t, d: t.lat != null && pos ? distM([t.lat, t.lng], [pos.lat, pos.lng]) : 9999 }))
+      .sort((a, b) => a.d - b.d).slice(0, 6);
+  }
+  function invForm(v, pos) {
+    const P = invPanel || { region: v.region, site: v.site, planter: v.planter || '' };
+    const isNew = !v;
+    const region = v ? v.region : P.region, site = v ? v.site : P.site;
+    const at = pos || (v && v.lat != null ? { lat: v.lat, lng: v.lng, acc: v.accuracy_m, src: v.loc_source } : null);
+    const addr = at && GEO ? ArbGeo.reverse(GEO, at.lat, at.lng) : null;
+    let link = v && v.linked ? allTrees.find(t => (t.uid || t.key) === v.tree_uid) || { uid: v.tree_uid } : null;
+    const sugg = invSuggestions(region, site, at, v && v.tree_uid);
+    const genera = [...new Set(allTrees.map(t => t.genus).filter(Boolean).concat(S.inv.map(x => x.genus).filter(Boolean)))].sort();
+    const val = k => v ? (v[k] ?? '') : '';
+    const body = dlg(isNew ? 'New tree' : 'Edit inventory tree', `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(RMAP[region].name)} · ${esc(site)}${at ? ` · ${at.src === 'map' ? 'placed on map' : 'GPS ±' + Math.round(at.acc ?? 0) + ' m'}` : ''}${addr ? ` · near ${esc(addr.address + ' ' + addr.dir + ' ' + addr.street)}` : ''}</div>
+      ${sugg.length || link ? `<div class="sec" style="margin-top:0">Is this one of the old records?</div>
+        <div id="nv-sugg">${(link && !sugg.some(x => (x.t.uid || x.t.key) === v.tree_uid) ? [{ t: link, d: null }] : []).concat(sugg).map((x, i) => `<button type="button" class="sugg ${link && (x.t.uid || x.t.key) === (link.uid || link.key) ? 'on' : ''}" data-i="${i}">
+          <span><b>${x.t.treeNo ? '#' + esc(x.t.treeNo) + ' ' : ''}${esc(x.t.genus ? x.t.genus + ' ' + (x.t.species || '') : speciesName(x.t))}</b>${x.t.dbh ? ' · ' + x.t.dbh + '″' : ''}<span class="muted"> · ${esc(x.t.uid || '')} ${x.t.site !== site ? '· ' + esc(x.t.site) : ''}</span></span>
+          <span class="d">${x.d != null && x.d < 9999 ? Math.round(x.d) + ' m from old spot' : ''}</span></button>`).join('')}
+          <button type="button" class="sugg ${link ? '' : 'on'}" data-i="none"><span><b>None of these</b> — new tree, new ID</span></button></div>` : ''}
+      <div class="form-grid" style="margin-top:10px">
+        <label>Planter / row<input id="nv-planter" value="${esc(v ? v.planter || '' : P.planter)}"></label>
+        <label class="req">Position / tree no.<input id="nv-pos" value="${esc(v ? v.position || '' : nextPosition(region, site, P.planter))}"></label>
+        <label>Status<select id="nv-status"><option value="tree">Tree</option><option value="vacant" ${val('status') === 'vacant' ? 'selected' : ''}>Vacant spot</option></select></label>
+        <label class="req">Condition<select id="nv-cond"><option value="">—</option>${['good', 'fair', 'poor', 'dead'].map(c => `<option value="${c}" ${val('condition') === c ? 'selected' : ''}>${c[0].toUpperCase() + c.slice(1)}</option>`).join('')}</select></label>
+        <label class="req">Genus<input id="nv-genus" list="nv-genera" value="${esc(val('genus'))}" autocomplete="off"></label>
+        <label class="req">Species<input id="nv-species" list="nv-specs" value="${esc(val('species'))}" autocomplete="off"></label>
+        <datalist id="nv-genera">${genera.map(g => `<option value="${esc(g)}">`).join('')}</datalist><datalist id="nv-specs"></datalist>
+        <label>Cultivar<input id="nv-cultivar" value="${esc(val('cultivar'))}"></label>
+        <label class="req">DBH (in)<input id="nv-dbh" type="number" step="0.25" inputmode="decimal" value="${esc(val('dbh'))}"></label>
+        <label>Pests / disease<input id="nv-pests" value="${esc(val('pests'))}"></label>
+        <label>Deadwood %<input id="nv-dead" type="number" inputmode="numeric" value="${esc(val('deadwood'))}"></label>
+        <label>ISA hazard (1–4)<select id="nv-haz"><option value="">—</option>${[1, 2, 3, 4].map(n => `<option ${String(val('hazard')) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}</select></label><span></span>
+        <label class="wide">Comments<textarea id="nv-comments">${esc(val('comments'))}</textarea></label>
+        <label class="wide ${v && v.photo_path ? '' : 'req'}">Photo${v && v.photo_path ? ' (one saved — add another to replace)' : ''}<input type="file" id="nv-photo" accept="image/*" capture="environment"></label>
+      </div>
+      <div class="form-actions">${v ? '<button class="btn danger" id="nv-del">Delete</button><span style="flex:1"></span>' : ''}<button class="btn primary" id="nv-save">${isNew ? 'Save tree' : 'Save changes'}</button></div>`);
+    const options = (link && !sugg.some(x => (x.t.uid || x.t.key) === v.tree_uid) ? [{ t: link }] : []).concat(sugg);
+    const fillSpecs = () => { const g = $('#nv-genus').value.trim().toLowerCase(); $('#nv-specs').innerHTML = [...new Set(allTrees.filter(t => (t.genus || '').toLowerCase() === g).map(t => t.species).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join(''); };
+    $('#nv-genus').oninput = fillSpecs; fillSpecs();
+    body.querySelectorAll('.sugg').forEach(b => b.onclick = () => {
+      body.querySelectorAll('.sugg').forEach(x => x.classList.remove('on')); b.classList.add('on');
+      if (b.dataset.i === 'none') { link = null; return; }
+      link = options[+b.dataset.i].t;
+      // start from the old record's species and size; edit if they changed
+      if (link.genus) $('#nv-genus').value = link.genus; if (link.species) $('#nv-species').value = link.species;
+      if (link.cultivar) $('#nv-cultivar').value = link.cultivar; if (link.dbh) $('#nv-dbh').value = link.dbh;
+      if (!$('#nv-planter').value && link.planter) $('#nv-planter').value = link.planter;
+      fillSpecs();
+    });
+    $('#nv-status').onchange = () => body.querySelectorAll('#nv-genus,#nv-species,#nv-dbh').forEach(x => x.closest('label').classList.toggle('req', $('#nv-status').value === 'tree'));
+    const del = $('#nv-del'); if (del) del.onclick = async () => {
+      if (!confirm('Delete this inventory tree?')) return;
+      const { error } = await sb.from('inventory_trees').delete().eq('id', v.id);
+      if (error) return toast(error.message, 5000);
+      S.inv = S.inv.filter(x => x !== v); closeDlg(); renderInv(); renderMap();
+    };
+    $('#nv-save').onclick = async () => {
+      const g = id => $(id).value.trim();
+      const status = g('#nv-status'), photo = $('#nv-photo').files[0];
+      const missing = [];
+      if (!g('#nv-pos')) missing.push('position');
+      if (!g('#nv-cond')) missing.push('condition');
+      if (status === 'tree') { if (!g('#nv-genus')) missing.push('genus'); if (!g('#nv-species')) missing.push('species'); if (!g('#nv-dbh')) missing.push('DBH'); }
+      if (!photo && !(v && v.photo_path)) missing.push('photo');
+      if (missing.length) return toast('Still needed: ' + missing.join(', '), 4000);
+      const btn = $('#nv-save'); btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        // permanent ID: linked old record, the row's existing ID, or a new one
+        let uidv = link ? (link.uid || link.key) : (v && !v.linked ? v.tree_uid : null);
+        if (!uidv && !S.noUids) {
+          const { data, error } = await sb.from('trees').insert({ region, site, current_key: null, created_by: me_() }).select('uid').single();
+          if (error) throw error; uidv = data.uid;
+        }
+        let photo_path = v ? v.photo_path : null;
+        if (photo) {
+          const blob = await shrink(photo);
+          photo_path = `${region}/${uid()}.jpg`;
+          const { error } = await sb.storage.from('tree-photos').upload(photo_path, blob, { contentType: 'image/jpeg' });
+          if (error) throw error;
+          await sb.from('tree_photos').insert({ tree_key: uidv, path: photo_path, author_email: me_(), caption: 'Inventory' });
+        }
+        const row = { region, site, planter: g('#nv-planter') || null, position: g('#nv-pos'), tree_uid: uidv, linked: !!link, status,
+          genus: g('#nv-genus') || null, species: g('#nv-species') || null, cultivar: g('#nv-cultivar') || null,
+          dbh: g('#nv-dbh') ? +g('#nv-dbh') : null, condition: g('#nv-cond') || null, pests: g('#nv-pests') || null,
+          deadwood: g('#nv-dead') ? +g('#nv-dead') : null, hazard: g('#nv-haz') ? +g('#nv-haz') : null, comments: g('#nv-comments') || null,
+          photo_path, updated_at: new Date().toISOString() };
+        if (at) Object.assign(row, { lat: +at.lat.toFixed(7), lng: +at.lng.toFixed(7), accuracy_m: at.acc == null ? null : Math.round(at.acc * 10) / 10, loc_source: at.src,
+          address: addr ? addr.address : null, addr_dir: addr ? addr.dir : null, street: addr ? addr.street : null });
+        let saved;
+        if (v) { const { error } = await sb.from('inventory_trees').update(row).eq('id', v.id); if (error) throw error; saved = Object.assign(v, row); }
+        else { const { data, error } = await sb.from('inventory_trees').insert({ ...row, collected_by: me_(), collected_at: new Date().toISOString() }).select().single(); if (error) throw error; saved = data; S.inv.push(saved); }
+        // the GPS point becomes this tree's location everywhere (old reports included)
+        if (uidv && at) {
+          const t = allTrees.find(x => (x.uid || x.key) === uidv) || { key: uidv, region };
+          await saveLoc(t, at.lat, at.lng, at.src === 'map' ? 'map' : 'gps', at.acc);
+        }
+        if (invPanel) { invPanel.planter = row.planter || ''; }
+        closeDlg(); renderInv(); renderMap();
+        toast(`${row.position ? '#' + row.position + ' ' : ''}saved${link ? ' · linked ' + uidv : uidv ? ' · ' + uidv : ''}`, 2200);
+      } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast('Could not save: ' + e.message, 6000); }
+    };
+  }
+  function invNudge(v) {
+    const t = { key: v.tree_uid || v.id, lat: v.lat, lng: v.lng, region: v.region, site: v.site, treeNo: v.position, genus: v.genus, species: v.species, status: v.status, address: v.address, addrDir: v.addr_dir, street: v.street };
+    startAdjust(t, async ll => {
+      const { error } = await sb.from('inventory_trees').update({ lat: +ll.lat.toFixed(7), lng: +ll.lng.toFixed(7), loc_source: 'map', updated_at: new Date().toISOString() }).eq('id', v.id);
+      if (error) { toast(error.message, 5000); return false; }
+      Object.assign(v, { lat: ll.lat, lng: ll.lng, loc_source: 'map' });
+      if (v.tree_uid) await saveLoc({ key: v.tree_uid, region: v.region }, ll.lat, ll.lng, 'map', null);
+      setTimeout(() => { if (!invPanel) openInv(); else { $('#inv').classList.remove('hidden'); renderInv(); } }, 50);
+      return true;
+    });
+    $('#inv').classList.add('hidden');
+  }
+  function invReview(oldLeft) {
+    const body = dlg('Old records not linked yet', `<div class="muted" style="font-size:12px;margin-bottom:8px">These trees are in the old report for this site but haven't been matched to an inventory tree. Mark any that aren't there as not found. Link the rest by dropping the tree and choosing it from the suggestions.</div>` +
+      oldLeft.map((t, i) => `<div class="rep-row"><div style="min-width:0"><b>${t.treeNo ? '#' + esc(t.treeNo) + ' ' : ''}${esc(speciesName(t))}</b>${t.dbh ? ' · ' + t.dbh + '″' : ''}<div class="fn">${esc(t.uid || '')} · ${esc(addr(t))}</div></div><button class="btn small" data-nf="${i}">Not found</button></div>`).join(''));
+    body.querySelectorAll('[data-nf]').forEach(b => b.onclick = async () => {
+      const t = oldLeft[+b.dataset.nf];
+      const row = { region: t.region, site: t.site, planter: t.planter || null, position: t.treeNo || null, tree_uid: t.uid || null, linked: true, status: 'not_found', genus: t.genus || null, species: t.species || null, dbh: t.dbh, collected_by: me_() };
+      const { data, error } = await sb.from('inventory_trees').insert(row).select().single();
+      if (error) return toast(error.message, 5000);
+      S.inv.push(data); b.disabled = true; b.textContent = 'Marked'; renderInv();
+    });
+  }
+  async function publishInventory(region, btn) {
+    const rows = S.inv.filter(v => v.region === region && v.status !== 'not_found');
+    const month = ym(new Date());
+    const nf_ = S.inv.filter(v => v.region === region && v.status === 'not_found').length;
+    const accounted = new Set(S.inv.filter(v => v.region === region && v.tree_uid).map(v => v.tree_uid));
+    const prev = S.reports.filter(r => r.region === region && r.source !== 'inventory').sort((a, b) => b.month.localeCompare(a.month))[0];
+    const prevTrees = prev ? (S.local ? prev.trees : await loadTrees(prev)).filter(t => t.status !== 'removed') : [];
+    const missing = prevTrees.filter(t => !accounted.has(t.uid || t.key)).length;
+    if (!confirm(`Publish the ${RMAP[region].name} inventory (${nf(rows.length)} trees${nf_ ? `, ${nf_} old records marked not found` : ''}) as the ${fmtMonth(month)} base report?` +
+      (missing ? `\n\nHeads up: ${nf(missing)} trees in the ${fmtMonth(prev.month)} report haven't been collected or marked not found yet. Publishing now makes the map show only the inventory for ${RMAP[region].name}. You can keep collecting and publish again later; it replaces this one.` : '') +
+      `\n\nIt becomes the starting point for future field reports.`)) return;
+    btn.disabled = true; btn.textContent = 'Publishing…';
+    try {
+      const old = S.reports.find(r => r.region === region && r.month === month && r.source === 'inventory' && r.id);
+      if (old) { const { error } = await sb.from('reports').delete().eq('id', old.id); if (error) throw error; }
+      const bySite = new Map(); rows.forEach(v => { if (!bySite.has(v.site)) bySite.set(v.site, []); bySite.get(v.site).push(v); });
+      const order = v => (parseFloat(v.planter) || 0) * 10000 + (parseFloat(v.position) || 0);
+      let seq = 0; const trees = [];
+      for (const [site, vs] of [...bySite].sort((a, b) => a[0].localeCompare(b[0]))) for (const v of vs.sort((a, b) => order(a) - order(b))) {
+        const key = `${region}|${site}|${v.planter || ''}|${v.position || ''}|inv`.toLowerCase();
+        trees.push({ key, uid: v.tree_uid, site, data: compact({ site, planter: v.planter || '', treeNo: v.position || '', genus: v.genus || '', species: v.species || '', cultivar: v.cultivar || '',
+          dbh: v.dbh == null ? null : +v.dbh, condition: v.condition || '', pests: v.pests || '', deadwood: v.deadwood == null ? null : +v.deadwood, hazard: v.hazard, comments: v.comments || '',
+          status: v.status === 'vacant' ? 'vacant' : 'tree', lat: v.lat, lng: v.lng, address: v.address || '', addrDir: v.addr_dir || '', street: v.street || '', seq: seq++,
+          inventoried: true, inspected: true, inspectedBy: v.collected_by || '', inspectedAt: v.collected_at }) });
+      }
+      const meta = { region, month, contractor: RMAP[region].contractor, file_name: 'GPS inventory', tree_count: trees.length, status: 'final', source: 'inventory',
+        sites: [...bySite.keys()].sort().map(site => ({ site, title: site, siteType: '', inspection: '', count: bySite.get(site).length })), warnings: [] };
+      const { data: saved, error } = await sb.from('reports').insert(meta).select().single();
+      if (error) throw error;
+      for (let i = 0; i < trees.length; i += 500) {
+        const { error: e2 } = await sb.from('report_trees').insert(trees.slice(i, i + 500).map(t => ({ report_id: saved.id, tree_key: t.key, site: t.site, data: t.data, ...(t.uid ? { tree_uid: t.uid } : {}) })));
+        if (e2) throw e2;
+      }
+      await loadReports(); renderExisting(); renderRegions(); refresh(true);
+      toast(`${RMAP[region].name} inventory published.`);
+    } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast('Could not publish: ' + e.message, 6000); }
   }
 
   // ---------- Generic dialog ----------
@@ -1730,7 +2043,7 @@
   const F_FIELDS = [
     ['status', 'Status', 'select', [['tree', 'Tree'], ['vacant', 'Vacant (no tree)'], ['removed', 'Removed']]],
     ['genus', 'Genus'], ['species', 'Species'], ['cultivar', 'Variety / cultivar'], ['code', 'Species code'],
-    ['dbh', 'DBH (in)', 'number'], ['pruned', 'Last pruned', 'month'], ['deadwood', 'Deadwood %', 'number'], ['lean', 'Lean'],
+    ['dbh', 'DBH (in)', 'number'], ['condition', 'Condition', 'select', [['', '—'], ['good', 'Good'], ['fair', 'Fair'], ['poor', 'Poor'], ['dead', 'Dead']]], ['pruned', 'Last pruned', 'month'], ['deadwood', 'Deadwood %', 'number'], ['lean', 'Lean'],
     ['hazard', 'ISA hazard (1–4)', 'select', [['', '—'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4']]],
     ['wounds', 'Trunk wounds / injury'], ['pests', 'Pests / disease', 'text', null, 'wide'],
     ['treated', 'Pest treatment applied', 'month'], ['product', 'Product used'],
@@ -1900,7 +2213,7 @@
     await loadProfile();
     if (S.profile && S.profile.role === 'pending') { $('#login').classList.add('hidden'); $('#pending').classList.remove('hidden'); $('#btn-signout').classList.remove('hidden'); return; }
     enterApp(false);
-    await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders()]);
+    await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders(), loadInventory()]);
     if (S.region !== 'all' && !myRegions().includes(S.region)) S.region = 'all';
     renderRegions(); await refresh(true);
     openFromLink();

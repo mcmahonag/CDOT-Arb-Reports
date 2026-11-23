@@ -26,6 +26,7 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `supabase/004_roles_field_reports.sql` | Staff/contractor roles, region-based access, field reports, photos |
 | `supabase/005_work_orders.sql` | Work orders and the completion function that updates reports |
 | `supabase/006_tree_ids.sql` | Permanent citywide tree IDs (T-10001…) and moves locations, notes, photos and orders onto them |
+| `supabase/007_inventory.sql` | New GPS inventory table |
 
 ## Setup (about 15 minutes)
 
@@ -61,8 +62,9 @@ In Supabase → SQL Editor, run each file from the `supabase` folder:
 2. `004_roles_field_reports.sql`: everyone who already has a login becomes **staff**. It also creates the private `tree-photos` storage bucket. If that part errors, create a **private** bucket named `tree-photos` under Storage and run the file again.
 3. `005_work_orders.sql`
 4. `006_tree_ids.sql`: gives every tree already in the database a permanent ID.
+5. `007_inventory.sql`
 
-For a brand-new database, run `schema.sql`, then 004, 005 and 006. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
+For a brand-new database, run `schema.sql`, then 004 through 007. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
 
 ## Roles
 
@@ -94,4 +96,17 @@ For a brand-new database, run `schema.sql`, then 004, 005 and 006. Don't re-run 
 - **Importing a report** keeps each tree's ID by matching its location. If a planter, number or address changed, it matches by best guess against the previous report (same site, species, DBH) and flags the tree *Tree ID matched by best guess* for staff to confirm or split off with a new ID. Trees added in the field get new IDs.
 - **Merge into…** in the tree panel (staff) combines two IDs that are the same physical tree. History, photos, notes and work orders move to the surviving ID.
 - **Links:** `…/CDOT-Arb-Reports/?tree=T-10042` opens that tree, which works for QR tags. Excel exports include a Tree ID column, and re-importing an exported workbook keeps the IDs.
+
+## New GPS inventory
+
+The fresh location survey. Staff and contractors can collect it, each limited to their regions.
+
+1. On the map, tap **🌳 New inventory**, then pick the region, site and (optionally) planter/row. GPS runs continuously, and the panel shows its accuracy.
+2. Stand at the trunk and tap **📍 Drop tree here**. The form shows the old report's records for that site, nearest first. Tap the one that matches to keep its tree ID and history, with its species and DBH pre-filled for you to correct. Or choose **None of these** to give it a new ID.
+3. **Required:** position number (pre-filled with the next number), condition, genus, species, DBH and a photo. Vacant spots need only position, condition and photo. The nearest street address is worked out from the centerlines.
+4. **Nudge** moves a dot by dragging it on the map; use the Satellite view to check it. **Drop at map center** places a tree at the red cross instead of GPS.
+5. **Old records not linked yet** lists what's left from the old report on that site. Mark trees that aren't there as **Not found**.
+6. When a region is done, staff open **Reports** and choose **Publish as report**. The inventory becomes that region's base report (one tab per site in Excel), and future field reports start from it. Publishing again replaces it.
+
+Saving an inventory tree also sets that tree ID's location everywhere, so linked trees move to their GPS position in the old reports straight away.
 

@@ -139,7 +139,31 @@
     return null;
   }
 
-  const api = { build, locate, normName };
+  // Nearest street address to a point (for trees placed by GPS): closest centerline within 80 m
+  function reverse(idx, lat, lng) {
+    if (!idx) return null;
+    const p = [lng, lat]; let best = null;
+    for (const s of idx.segs) {
+      const a = s.pts[0], b = s.pts[s.pts.length - 1];
+      if (Math.abs(a[1] - lat) > 0.01 && Math.abs(b[1] - lat) > 0.01) continue;   // quick reject (~1 km)
+      if (Math.abs(a[0] - lng) > 0.013 && Math.abs(b[0] - lng) > 0.013) continue;
+      const r = nearestOn(s, p);
+      if (r.d < 80 && (!best || r.d < best.d)) best = { s, q: r.q, d: r.d };
+    }
+    if (!best) return null;
+    const s = best.s, total = s.lens[s.lens.length - 1] || 1;
+    let along = 0;
+    for (let i = 1; i < s.pts.length; i++) {
+      const seg = s.lens[i] - s.lens[i - 1], r = nearestOn({ pts: [s.pts[i - 1], s.pts[i]] }, best.q);
+      if (r.d < 0.5) { along = s.lens[i - 1] + dist(s.pts[i - 1], best.q); break; }
+    }
+    let f = along / total; if (!s.inc) f = 1 - f;
+    const num = Math.round(s.lo + f * (s.hi - s.lo));
+    const title = w => w.split(' ').map(x => x.length <= 2 && /^\d/.test(x) ? x.toLowerCase() : x[0] + x.slice(1).toLowerCase()).join(' ');
+    return { address: String(num), dir: s.pre, street: title(s.name) + (s.type ? ' ' + title(s.type) : ''), meters: Math.round(best.d) };
+  }
+
+  const api = { build, locate, normName, reverse };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ArbGeo = api;
 })(typeof window !== 'undefined' ? window : globalThis);
