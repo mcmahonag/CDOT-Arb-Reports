@@ -103,10 +103,11 @@ The fresh location survey. Staff and contractors can collect it, each limited to
 
 1. On the map, tap **🌳 New inventory**, then pick the region, site and (optionally) planter/row. GPS runs continuously, and the panel shows its accuracy.
 2. Stand at the trunk and tap **📍 Drop tree here**. The form shows the old report's records for that site, nearest first. Tap the one that matches to keep its tree ID and history, with its species and DBH pre-filled for you to correct. Or choose **None of these** to give it a new ID.
-3. **Required:** position number (pre-filled with the next number), condition, genus, species, DBH and a photo. Vacant spots need only position, condition and photo. The nearest street address is worked out from the centerlines.
-4. **Nudge** moves a dot by dragging it on the map; use the Satellite view to check it. **Drop at map center** places a tree at the red cross instead of GPS.
-5. **Old records not linked yet** lists what's left from the old report on that site. Mark trees that aren't there as **Not found**.
-6. When a region is done, staff open **Reports** and choose **Publish as report**. The inventory becomes that region's base report (one tab per site in Excel), and future field reports start from it. Publishing again replaces it.
+3. **Find species:** type any part of a genus, species, cultivar, common name or code (e.g. "honeyl", "skyl", "coffee", "QUBI") and tap a match to fill in genus, species and cultivar. The list in `species.js` holds about 150 Chicago street trees with common names, and species from your reports are merged in, so the ones you use most come first. Add to it freely.
+4. **Required:** position number (pre-filled with the next number), condition, genus, species, DBH and a photo. Vacant spots need only position, condition and photo. The nearest street address is worked out from the centerlines.
+5. **Nudge** moves a dot by dragging it on the map; use the Satellite view to check it. **Drop at map center** places a tree at the red cross instead of GPS.
+6. **Old records not linked yet** lists what's left from the old report on that site. Mark trees that aren't there as **Not found**.
+7. When a region is done, staff open **Reports** and choose **Publish as report**. The inventory becomes that region's base report (one tab per site in Excel), and future field reports start from it. Publishing again replaces it.
 
 Saving an inventory tree also sets that tree ID's location everywhere, so linked trees move to their GPS position in the old reports straight away.
 

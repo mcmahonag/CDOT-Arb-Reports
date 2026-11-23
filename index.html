@@ -12,6 +12,7 @@
 <script src="config.js"></script>
 <script src="parser.js"></script>
 <script src="geocode.js"></script>
+<script src="species.js"></script>
 <style>
   :root {
     --ink: #17201b; --ink-2: #4f5a53; --ink-3: #7c867f;
@@ -263,6 +264,14 @@
   .tid { font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.tid { color: var(--ink-2); font-size: 12px; }
   #btn-help { font-weight: 700; min-width: 34px; }
+  .sp-wrap { position: relative; }
+  .sp-wrap input { width: 100%; border: 1.5px solid #9cc2a9; border-radius: 8px; padding: 8px 10px 8px 32px; font-size: 14px; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237c867f' stroke-width='2.5'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center; }
+  .sp-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 3px); background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.15); max-height: 280px; overflow: auto; margin: 0; padding: 4px; list-style: none; }
+  .sp-list li { padding: 8px 9px; border-radius: 7px; cursor: pointer; font-size: 14px; line-height: 1.3; color: var(--ink); }
+  .sp-list li.on, .sp-list li:hover { background: #eef5f0; }
+  .sp-list li .cn { display: block; color: var(--ink-2); font-size: 12.5px; }
+  .sp-list li .ct { float: right; color: var(--ink-3); font-size: 11.5px; margin-left: 8px; }
+  .sp-list li.none { color: var(--ink-3); cursor: default; background: none; }
   .help details { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: #fff; }
   .help summary { padding: 11px 12px; font-weight: 600; cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; }
   .help summary::-webkit-details-marker { display: none; }
@@ -1037,7 +1046,9 @@
     if (!S.local && isStaff()) { renderNotes(t.key); $('#d-add').onclick = () => addNote(t.key); }
     if (!S.local) renderPhotos(t);
     $('#d-body').querySelectorAll('[data-wodone]').forEach(b => b.onclick = () => completeOrder(S.orders.find(o => o.id === b.dataset.wodone)));
-    const ed = $('#d-edit'); if (ed) ed.onclick = () => { $('#d-body').innerHTML = editForm(t); $('#ed-cancel').onclick = () => openTree(t); $('#ed-save').onclick = () => saveEdit(t); $('#d-body').scrollTop = 0; };
+    const ed = $('#d-edit'); if (ed) ed.onclick = () => { $('#d-body').innerHTML = editForm(t);
+      const q = k => $('#d-body').querySelector(`[data-k="${k}"]`);
+      speciesPicker($('#ed-sp'), { genus: q('genus'), species: q('species'), cultivar: q('cultivar'), code: q('code') }); $('#ed-cancel').onclick = () => openTree(t); $('#ed-save').onclick = () => saveEdit(t); $('#d-body').scrollTop = 0; };
     const uok = $('#d-uid-ok'); if (uok) uok.onclick = async () => {
       const d = compact(t); delete d.uidMatch;
       const { error } = await sb.from('report_trees').update({ data: d }).eq('report_id', t.reportId).eq('tree_key', t.lockey);
@@ -1685,10 +1696,15 @@
     const addr = at && GEO ? ArbGeo.reverse(GEO, at.lat, at.lng) : null;
     let link = v && v.linked ? allTrees.find(t => (t.uid || t.key) === v.tree_uid) || { uid: v.tree_uid } : null;
     const sugg = invSuggestions(region, site, at, v && v.tree_uid);
-    const genera = [...new Set(allTrees.map(t => t.genus).filter(Boolean).concat(S.inv.map(x => x.genus).filter(Boolean)))].sort();
     const val = k => v ? (v[k] ?? '') : '';
     const body = dlg(isNew ? 'New tree' : 'Edit inventory tree', `
       <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(RMAP[region].name)} · ${esc(site)}${at ? ` · ${at.src === 'map' ? 'placed on map' : 'GPS ±' + Math.round(at.acc ?? 0) + ' m'}` : ''}${addr ? ` · near ${esc(addr.address + ' ' + addr.dir + ' ' + addr.street)}` : ''}</div>
+      ${(() => {
+        if (!at || !isNew) return '';
+        const near = allTrees.filter(t => t.region === region && t.lat != null).map(t => ({ t, d: distM([t.lat, t.lng], [at.lat, at.lng]) })).sort((a, b) => a.d - b.d)[0];
+        const siteNear = Math.min(...allTrees.filter(t => t.region === region && t.site === site && t.lat != null).map(t => distM([t.lat, t.lng], [at.lat, at.lng])), Infinity);
+        return near && near.t.site !== site && near.d < 60 && siteNear > 300 ? `<div class="wo" style="border-color:#f5d08a;background:#fffaf0;margin-bottom:10px">You look to be at <b>${esc(near.t.site)}</b>, not ${esc(site)}. <button type="button" class="btn small" id="nv-switch" data-site="${esc(near.t.site)}">Switch site</button></div>` : '';
+      })()}
       ${sugg.length || link ? `<div class="sec" style="margin-top:0">Is this one of the old records?</div>
         <div id="nv-sugg">${(link && !sugg.some(x => (x.t.uid || x.t.key) === v.tree_uid) ? [{ t: link, d: null }] : []).concat(sugg).map((x, i) => `<button type="button" class="sugg ${link && (x.t.uid || x.t.key) === (link.uid || link.key) ? 'on' : ''}" data-i="${i}">
           <span><b>${x.t.treeNo ? '#' + esc(x.t.treeNo) + ' ' : ''}${esc(x.t.genus ? x.t.genus + ' ' + (x.t.species || '') : speciesName(x.t))}</b>${x.t.dbh ? ' · ' + x.t.dbh + '″' : ''}<span class="muted"> · ${esc(x.t.uid || '')} ${x.t.site !== site ? '· ' + esc(x.t.site) : ''}</span></span>
@@ -1699,9 +1715,9 @@
         <label class="req">Position / tree no.<input id="nv-pos" value="${esc(v ? v.position || '' : nextPosition(region, site, P.planter))}"></label>
         <label>Status<select id="nv-status"><option value="tree">Tree</option><option value="vacant" ${val('status') === 'vacant' ? 'selected' : ''}>Vacant spot</option></select></label>
         <label class="req">Condition<select id="nv-cond"><option value="">—</option>${['good', 'fair', 'poor', 'dead'].map(c => `<option value="${c}" ${val('condition') === c ? 'selected' : ''}>${c[0].toUpperCase() + c.slice(1)}</option>`).join('')}</select></label>
-        <label class="req">Genus<input id="nv-genus" list="nv-genera" value="${esc(val('genus'))}" autocomplete="off"></label>
-        <label class="req">Species<input id="nv-species" list="nv-specs" value="${esc(val('species'))}" autocomplete="off"></label>
-        <datalist id="nv-genera">${genera.map(g => `<option value="${esc(g)}">`).join('')}</datalist><datalist id="nv-specs"></datalist>
+        <label class="wide">Find species<div id="nv-sp"></div></label>
+        <label class="req">Genus<input id="nv-genus" value="${esc(val('genus'))}" autocomplete="off"></label>
+        <label class="req">Species<input id="nv-species" value="${esc(val('species'))}" autocomplete="off"></label>
         <label>Cultivar<input id="nv-cultivar" value="${esc(val('cultivar'))}"></label>
         <label class="req">DBH (in)<input id="nv-dbh" type="number" step="0.25" inputmode="decimal" value="${esc(val('dbh'))}"></label>
         <label>Pests / disease<input id="nv-pests" value="${esc(val('pests'))}"></label>
@@ -1712,8 +1728,9 @@
       </div>
       <div class="form-actions">${v ? '<button class="btn danger" id="nv-del">Delete</button><span style="flex:1"></span>' : ''}<button class="btn primary" id="nv-save">${isNew ? 'Save tree' : 'Save changes'}</button></div>`);
     const options = (link && !sugg.some(x => (x.t.uid || x.t.key) === v.tree_uid) ? [{ t: link }] : []).concat(sugg);
-    const fillSpecs = () => { const g = $('#nv-genus').value.trim().toLowerCase(); $('#nv-specs').innerHTML = [...new Set(allTrees.filter(t => (t.genus || '').toLowerCase() === g).map(t => t.species).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join(''); };
-    $('#nv-genus').oninput = fillSpecs; fillSpecs();
+    const fillSpecs = () => {};
+    speciesPicker($('#nv-sp'), { genus: $('#nv-genus'), species: $('#nv-species'), cultivar: $('#nv-cultivar') });
+    const sw = $('#nv-switch'); if (sw) sw.onclick = () => { if (invPanel) { invPanel.site = sw.dataset.site; renderInv(); } closeDlg(); invForm(null, pos); };
     body.querySelectorAll('.sugg').forEach(b => b.onclick = () => {
       body.querySelectorAll('.sugg').forEach(x => x.classList.remove('on')); b.classList.add('on');
       if (b.dataset.i === 'none') { link = null; return; }
@@ -1836,6 +1853,102 @@
       await loadReports(); renderExisting(); renderRegions(); refresh(true);
       toast(`${RMAP[region].name} inventory published.`);
     } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast('Could not publish: ' + e.message, 6000); }
+  }
+
+  // ---------- Species search ----------
+  // One box that matches genus, species, cultivar, common name or code. Built from species.js plus every
+  // species in the loaded reports; misspellings from the old spreadsheets fold into the correct name.
+  const spNorm = x => String(x || '').toLowerCase().replace(/[‘’'"“”.]/g, '').replace(/^x\s+/, '').replace(/\s+/g, ' ').trim();
+  function lev(a, b) {
+    if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+    return prev[b.length];
+  }
+  const close = (a, b, n = 2) => a === b || (a.length > 3 && b.length > 3 && lev(a, b) <= n)
+    || (a.length >= 6 && b.length >= 6 && a.slice(0, 3) === b.slice(0, 3) && lev(a, b) <= 3);   // dioica / diocia / dioicus
+  const GENERIC_SP = new Set(['sp', 'spp', 'hybrid', 'hyb', 'x', '']);
+  const mkCode = (g, sp, cv) => (spNorm(g).slice(0, 2) + (GENERIC_SP.has(spNorm(sp)) ? 'sp' : spNorm(sp).replace(/^x /, '').slice(0, 2)) + spNorm(cv).replace(/[^a-z]/g, '').slice(0, 2)).toUpperCase();
+  let SP = null, spBuiltFor = -1;
+  function speciesIndex() {
+    const n = allTrees.length + S.inv.length;
+    if (SP && spBuiltFor === n) return SP;
+    const list = (window.TREE_SPECIES || []).map(([g, sp, cv, cn]) => ({ g, sp, cv, cn, n: 0, codes: {} }));
+    const find = (g, sp, cv) => {
+      const G = spNorm(g), Sp = spNorm(sp), Cv = spNorm(cv);
+      const sameG = list.filter(e => close(spNorm(e.g), G, 2));
+      if (!sameG.length) return null;
+      if (Cv && GENERIC_SP.has(Sp)) { const hit = sameG.find(e => e.cv && close(spNorm(e.cv), Cv)); if (hit) return hit; }
+      const sameS = sameG.filter(e => close(spNorm(e.sp), Sp) || (GENERIC_SP.has(Sp) && GENERIC_SP.has(spNorm(e.sp))));
+      if (!sameS.length) return null;
+      if (Cv) return sameS.find(e => e.cv && close(spNorm(e.cv), Cv)) || { add: sameS[0] };
+      return sameS.find(e => !e.cv) || null;
+    };
+    const seen = (g, sp, cv, code, k) => {
+      if (!g) return;
+      const cvClean = String(cv || '').replace(/[‘’'"“”]/g, '').trim();
+      let e = find(g, sp, cvClean);
+      if (e && e.add) { const base = e.add; e = { g: base.g, sp: base.sp, cv: cvClean.replace(/\b\w/g, c => c.toUpperCase()), cn: '', n: 0, codes: {} }; list.push(e); }
+      if (!e) { e = list.find(x => spNorm(x.g) === spNorm(g) && spNorm(x.sp) === spNorm(sp) && spNorm(x.cv) === spNorm(cvClean)); }
+      if (!e) { e = { g: g.trim(), sp: String(sp || '').trim(), cv: cvClean, cn: (list.find(x => close(spNorm(x.g), spNorm(g)) && !x.cv && GENERIC_SP.has(spNorm(x.sp))) || {}).cn || '', n: 0, codes: {} }; list.push(e); }
+      e.n += k; if (code) e.codes[code] = (e.codes[code] || 0) + k;
+    };
+    const agg = new Map();
+    for (const t of allTrees) if (t.genus) { const key = [t.genus, t.species, t.cultivar, t.code].join('|'); agg.set(key, (agg.get(key) || 0) + 1); }
+    for (const v of S.inv) if (v.genus) { const key = [v.genus, v.species, v.cultivar, ''].join('|'); agg.set(key, (agg.get(key) || 0) + 1); }
+    for (const [key, k] of agg) { const [g, sp, cv, code] = key.split('|'); seen(g, sp, cv, code, k); }
+    for (const e of list) {
+      const good = Object.entries(e.codes).filter(([c]) => /^[A-Z]{4,8}$/i.test(c) && (!e.cv || c.length > 4) && (!GENERIC_SP.has(spNorm(e.sp)) || /SP|X/i.test(c.slice(2, 4)))).sort((a, b) => b[1] - a[1]);
+      e.code = good.length ? good[0][0].toUpperCase() : mkCode(e.g, e.sp, e.cv);
+      e.hay = [e.g, e.sp, e.cv, e.cn, e.code].join(' ').toLowerCase().replace(/[‘’'"“”().!]/g, '');
+      e.words = e.hay.split(/[\s\-\/]+/).filter(Boolean);
+    }
+    SP = list; spBuiltFor = n; return SP;
+  }
+  function spSearch(q) {
+    const toks = q.toLowerCase().replace(/[‘’'"“”().!]/g, '').split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+    const out = [];
+    for (const e of speciesIndex()) {
+      let score = 0, ok = true;
+      for (const t of toks) {
+        const w = e.words.find(x => x.startsWith(t)) || (t.length >= 4 && e.words.find(x => x.length >= t.length && lev(x.slice(0, t.length), t) <= 1));
+        if (w) { score += 2; if (spNorm(e.g).startsWith(t)) score += 2; if (e.cn.toLowerCase().split(/\s+/).some(x => x.replace(/[()]/g, '').startsWith(t))) score += 1; }
+        else if (t.length >= 3 && e.hay.includes(t)) score += 1;
+        else { ok = false; break; }
+      }
+      if (ok) out.push({ e, score: score + Math.log10(1 + e.n) });
+    }
+    return out.sort((a, b) => b.score - a.score || b.e.n - a.e.n || a.e.g.localeCompare(b.e.g)).slice(0, 10).map(x => x.e);
+  }
+  // Mount a species search box into holder; fills the given fields when a species is picked
+  function speciesPicker(holder, fields) {
+    holder.innerHTML = `<div class="sp-wrap"><input type="search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="Type genus, species or common name"><ul class="sp-list hidden"></ul></div>`;
+    const inp = holder.querySelector('input'), ul = holder.querySelector('ul');
+    let items = [], sel = -1;
+    const draw = () => {
+      items = spSearch(inp.value); sel = items.length ? 0 : -1;
+      if (!inp.value.trim()) { ul.classList.add('hidden'); return; }
+      ul.innerHTML = items.length ? items.map((e, i) => `<li data-i="${i}" class="${i === sel ? 'on' : ''}">${e.n ? `<span class="ct">${nf(e.n)} in reports</span>` : ''}<i>${esc(e.g)} ${esc(e.sp)}</i>${e.cv ? ` ‘${esc(e.cv)}’` : ''}<span class="cn">${esc(e.cn || '—')} · ${esc(e.code)}</span></li>`).join('')
+        : '<li class="none">No match — type the genus and species in the boxes below.</li>';
+      ul.classList.remove('hidden');
+      ul.querySelectorAll('li[data-i]').forEach(li => li.onmousedown = ev => { ev.preventDefault(); pick(items[+li.dataset.i]); });
+    };
+    const pick = e => {
+      const set = (el, v) => { if (el) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } };
+      set(fields.genus, e.g); set(fields.species, e.sp); set(fields.cultivar, e.cv); if (fields.code) set(fields.code, e.code);
+      inp.value = `${e.g} ${e.sp}${e.cv ? ' ‘' + e.cv + '’' : ''}${e.cn ? ' — ' + e.cn : ''}`;
+      ul.classList.add('hidden'); inp.blur();
+    };
+    inp.oninput = draw;
+    inp.onfocus = () => { if (inp.value.trim()) { inp.select(); draw(); } };
+    inp.onblur = () => setTimeout(() => ul.classList.add('hidden'), 150);
+    inp.onkeydown = ev => {
+      if (ul.classList.contains('hidden') || !items.length) return;
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); sel = (sel + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; ul.querySelectorAll('li').forEach((li, i) => li.classList.toggle('on', i === sel)); ul.children[sel]?.scrollIntoView({ block: 'nearest' }); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); pick(items[Math.max(0, sel)]); }
+      else if (ev.key === 'Escape') ul.classList.add('hidden');
+    };
   }
 
   // ---------- Help / FAQ ----------
@@ -2148,7 +2261,7 @@
   const toMonthInput = (label, ymv) => ymv && /^\d{4}-\d{2}$/.test(ymv) ? ymv : (ArbParser.sortableDate(label || '').length === 7 ? ArbParser.sortableDate(label) : '');
   function editForm(t) {
     const val = k => t[k] ?? '';
-    return `<div class="form-grid">${F_FIELDS.map(([k, l, type, opts, cls]) => {
+    return `<div class="form-grid"><label class="wide">Find species<div id="ed-sp"></div></label>${F_FIELDS.map(([k, l, type, opts, cls]) => {
       if (type === 'select') return `<label class="${cls || ''}">${l}<select data-k="${k}">${opts.map(([v, n]) => `<option value="${v}" ${String(val(k)) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
       if (type === 'month') return `<label class="${cls || ''}">${l}<input type="month" data-k="${k}" value="${esc(toMonthInput(t[k], k === 'pruned' ? t.prunedYM : k === 'planted' ? t.plantedYM : ''))}"><span class="muted" style="font-size:11px">${esc(t[k] || '')}</span></label>`;
       if (type === 'textarea') return `<label class="${cls || ''}">${l}<textarea data-k="${k}">${esc(val(k))}</textarea></label>`;
@@ -2185,6 +2298,7 @@
       <label class="wide">Site<select id="nt-site"></select></label>
       <label class="wide hidden" id="nt-newsite-l">New site name<input id="nt-newsite" placeholder="e.g. Halsted - 103rd to 95th"></label>
       <label>Planter<input id="nt-planter"></label><label>Tree no.<input id="nt-no"></label>
+      <label class="wide">Find species<div id="nt-sp"></div></label>
       <label>Genus<input id="nt-genus"></label><label>Species<input id="nt-species"></label>
       <label>Variety / cultivar<input id="nt-cultivar"></label><label>DBH (in)<input id="nt-dbh" type="number" step="0.25" inputmode="decimal"></label>
       <label>Planted<input id="nt-planted" type="month"></label><span></span>
@@ -2193,6 +2307,7 @@
     </div><div class="form-actions"><button class="btn primary" id="nt-save">Add tree</button></div>`);
     const fillSites = () => { const r = reps[+($('#nt-rep')?.value || 0)]; $('#nt-site').innerHTML = sitesOf(r).map(x => `<option>${esc(x)}</option>`).join('') + '<option value="__new">New site…</option>'; if (openKey) { const t = allTrees.find(x => x.key === openKey); if (t) $('#nt-site').value = t.site; } };
     fillSites(); if ($('#nt-rep')) $('#nt-rep').onchange = fillSites;
+    speciesPicker($('#nt-sp'), { genus: $('#nt-genus'), species: $('#nt-species'), cultivar: $('#nt-cultivar') });
     $('#nt-site').onchange = () => $('#nt-newsite-l').classList.toggle('hidden', $('#nt-site').value !== '__new');
     $('#nt-save').onclick = async () => {
       const r = reps[+($('#nt-rep')?.value || 0)];
