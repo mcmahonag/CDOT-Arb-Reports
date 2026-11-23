@@ -28,6 +28,7 @@ Hosting is the same as the Reno tree app: static files on GitHub Pages, with Sup
 | `supabase/006_tree_ids.sql` | Permanent citywide tree IDs (T-10001…) and moves locations, notes, photos and orders onto them |
 | `supabase/007_inventory.sql` | New GPS inventory table |
 | `supabase/008_proposals.sql` | Contract price sheets and contractor proposals |
+| `supabase/009_price_decimals_regions.sql` | Unit prices to 4 decimals; regions no longer fixed in the database |
 
 ## Setup (about 15 minutes)
 
@@ -65,8 +66,9 @@ In Supabase → SQL Editor, run each file from the `supabase` folder:
 4. `006_tree_ids.sql`: gives every tree already in the database a permanent ID.
 5. `007_inventory.sql`
 6. `008_proposals.sql`
+7. `009_price_decimals_regions.sql`
 
-For a brand-new database, run `schema.sql`, then 004 through 008. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
+For a brand-new database, run `schema.sql`, then 004 through 009. Don't re-run `schema.sql` after 004, because it would re-open access to every signed-in user.
 
 ## Roles
 
@@ -90,7 +92,8 @@ For a brand-new database, run `schema.sql`, then 004 through 008. Don't re-run `
 - **Issue:** staff issue an order from a tree's panel (prune, remove, treat, inspect), or use **Work order for these trees** to cover everything in the current filter, e.g. a storm event.
 - **Alert:** contractors see a count on the **Work orders** button and a ring around each ordered tree on the map (red = urgent).
 - **Complete:** **Mark complete** records the date and notes and updates the tree in the latest report. Prune sets the last-pruned date, remove marks the tree removed, and treat sets the treatment date.
-- Alerts are in the app only. Email notifications would need an email service connected to Supabase.
+
+Alerts are in the app only. Email notifications would need an email service connected to Supabase.
 
 ## Tree IDs
 
@@ -119,7 +122,7 @@ The **?** button in the header opens a how-to and FAQ written for contractors: g
 
 ## Contract prices and proposals
 
-**Contract prices (staff):** go to **Reports → Contract prices → Import** for each region. Paste the rows from the price sheet (Item No. | Description | Unit Price | Unit) or choose the Excel file. Importing again replaces that region's sheet, and proposals already sent keep their prices. Pruning and removal items with a size range in the description (e.g. `TREE PRUNING 13-26 IN. CALIPER`, `TREE REMOVAL - OVER 45" DBH`) are used to price trees by DBH automatically.
+**Contract prices (staff):** go to **Reports → Contract prices → Import**. Choosing a workbook with one tab per region (e.g. `median_prices_2026.xlsx`: Item No. in column A, description in B, unit price in G, unit of measure in H) imports every region at once. Tabs are matched by name, so small typos are fine, and empty tabs are skipped. Otherwise import one region at a time. Paste the rows from the price sheet (Item No. | Description | Unit Price | Unit) or choose the Excel file. Importing again replaces that region's sheet, and proposals already sent keep their prices. Pruning and removal items with a size range in the description (e.g. `TREE PRUNING 13-26 IN. CALIPER`, `TREE REMOVAL - OVER 45" DBH`) are used to price trees by DBH automatically.
 
 **Proposals (contractor → CDOT):**
 1. **Start one:** open a tree and choose **Propose work**, or filter to a set of trees and choose **Proposal for these trees**.
@@ -132,6 +135,8 @@ The **?** button in the header opens a how-to and FAQ written for contractors: g
 4. **Send it:** **Send to CDOT** puts it on CDOT's **Proposals** badge.
 
 **Review (staff):** **Approve** issues a work order for each tree, linked back to the proposal. **Decline** takes a note, and **Ask a question** sends it back to the contractor, who sees a badge and can reply or withdraw. **Print / PDF** produces a signed-off copy for purchasing.
+
+**Adding a region (e.g. Lake Shore Drive):** run 009 once, then add a line to `REGIONS` in `config.js` (examples are commented in there), and name its tab in the price workbook to match.
 
 Alerts are in the app only. Email notifications can be added later by connecting an email service to Supabase.
 

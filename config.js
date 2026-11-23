@@ -13,5 +13,8 @@ window.APP_CONFIG = {
     { id: 'southwest', name: 'Southwest', contractor: 'Christy Webber' },
     { id: 'central',   name: 'Central',   contractor: 'A Safe Haven' },
     { id: 'southeast', name: 'Southeast', contractor: 'A Safe Haven' },
+    // Lake Shore Drive — add when the contract is set up (run supabase/009 first), e.g.:
+    // { id: 'lsd_north', name: 'LSD North', contractor: '' },
+    // { id: 'lsd_south', name: 'LSD South', contractor: '' },
   ],
 };

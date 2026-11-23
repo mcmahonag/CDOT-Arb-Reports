@@ -2044,7 +2044,8 @@
   if (new URLSearchParams(location.search).has('help')) setTimeout(showHelp, 300);
 
   // ---------- Contract prices ----------
-  const money = n => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = n => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const amt = (q, p) => Math.round((+q || 0) * (+p || 0) * 100) / 100;
   async function loadPrices() {
     if (S.local) return;
     const { data, error } = await sb.from('price_items').select('*').eq('active', true).order('sort').limit(5000);
@@ -2069,30 +2070,59 @@
     for (const b of bands) if (dbh >= b.r.min - 0.5) pick = b;
     return pick && (dbh <= pick.r.max + 0.999 || pick.r.max === Infinity) ? pick.p : null;
   }
+  const numOf = v => { const n = parseFloat(String(v).replace(/[$,\s]/g, '')); return /^\$?\s*[\d,]*\.?\d+\s*$/.test(String(v).trim()) && isFinite(n) ? n : null; };
+  // One spreadsheet row (cells) -> item: [item no.] description … unit price, unit of measure
+  function priceRow(cells) {
+    const c = cells.map(x => String(x ?? '').replace(/\u00a0/g, ' ').trim()).filter(Boolean);
+    if (c.length < 3) return null;
+    if (numOf(c[c.length - 1]) != null && /^\d+[A-Za-z]?$/.test(c[0]) && c.length >= 3) c.push('');   // unit of measure left blank
+    const unit = c[c.length - 1], price = numOf(c[c.length - 2]);
+    if (price == null || (unit && (numOf(unit) != null || !/[A-Za-z]/.test(unit))) || unit.length > 20) return null;
+    let rest = c.slice(0, -2), item_no = '';
+    if (rest.length > 1 && /^\d+[A-Za-z]?$/.test(rest[0])) item_no = rest.shift();
+    const description = rest.join(' ').replace(/\s{2,}/g, ' ').trim();
+    if (!/[A-Za-z]/.test(description) || /^(item|line|term|no\.?|description)\b/i.test(description)) return null;
+    return { item_no, description, unit_price: Math.round(price * 10000) / 10000, unit };
+  }
   function parsePriceText(text) {
     const items = [], skipped = [];
     for (const raw of String(text).split(/\r?\n/)) {
       const line = raw.replace(/\u00a0/g, ' ').trim(); if (!line) continue;
-      const m = line.match(/^(?:(\d+[A-Za-z]?)[\s\t]+)?(.+?)[\s\t]+\$?\s*([\d,]+(?:\.\d{1,2})?)\s*[\t ]+([A-Za-z][A-Za-z .\/]*)$/);
-      if (!m || /^(item|no\.?|description)\b/i.test(line)) { skipped.push(line); continue; }
+      if (line.includes('\t')) { const it = priceRow(line.split('\t')); if (it) { items.push(it); continue; } }
+      const m = line.match(/^(?:(\d+[A-Za-z]?)[\s\t]+)?(.+?)[\s\t]+\$?\s*([\d,]*\.?\d+)\s*[\t ]+([A-Za-z][A-Za-z .\/]*)$/);
+      if (/^(line|term|item|no\.?|description|unit)\b/i.test(line)) continue;
+      if (!m) { skipped.push(line); continue; }
       const price = parseFloat(m[3].replace(/,/g, ''));
       if (!isFinite(price)) { skipped.push(line); continue; }
-      items.push({ item_no: m[1] || '', description: m[2].replace(/\s{2,}/g, ' ').trim(), unit_price: price, unit: m[4].trim() });
+      items.push({ item_no: m[1] || '', description: m[2].replace(/\s{2,}/g, ' ').trim(), unit_price: Math.round(price * 10000) / 10000, unit: m[4].trim() });
     }
     return { items, skipped };
   }
+  // Which region a workbook tab belongs to: by tab name (typos allowed), else by the ", SW" / ", CE" tag in its descriptions
+  function editDist(a, b) { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
+  function regionForSheet(name, items) {
+    const n = String(name).toLowerCase().replace(/[^a-z]/g, '');
+    for (const r of REGIONS) for (const k of [r.id, r.name]) { const x = String(k).toLowerCase().replace(/[^a-z]/g, ''); if (n === x || (x.length > 4 && editDist(n, x) <= 2)) return r.id; }
+    const tags = { n: 'north', sw: 'southwest', ce: 'central', c: 'central', se: 'southeast' }, count = {};
+    for (const it of items) { const m = it.description.match(/,\s*([A-Z]{1,2})\s*$/); const id = m && tags[m[1].toLowerCase()]; if (id && RMAP[id]) count[id] = (count[id] || 0) + 1; }
+    const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
+    return best && best[1] >= items.length / 3 ? best[0] : null;
+  }
+  const bandText = items => items.filter(p => sizeRule(p.description)).map(p => { const r = sizeRule(p.description); return (r.kind === 'prune' ? 'prune ' : 'remove ') + (r.max === Infinity ? '>' + Math.floor(r.min) : r.min + '–' + r.max) + '"'; });
   function importPrices(region) {
     const body = dlg('Import contract prices', `<div class="form-grid">
         <label>Region<select id="pi-reg">${REGIONS.map(r => `<option value="${r.id}" ${r.id === region ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
         <label>Effective date<input type="date" id="pi-eff"></label>
         <label class="wide">Contract / sheet name<input id="pi-sheet" placeholder="e.g. 2026 Southwest landscape contract"></label>
         <label class="wide">Paste the price rows (item no., description, unit price, unit) — straight from Excel is fine<textarea id="pi-text" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px" placeholder="16	TREE PRUNING 6-12 IN. CALIPER, SW	$150.00	Each"></textarea></label>
-        <label class="wide">…or choose the Excel / CSV file<input type="file" id="pi-file" accept=".xlsx,.xls,.xlsm,.csv"></label>
+        <label class="wide">…or choose the Excel / CSV file — a workbook with one tab per region imports every region at once<input type="file" id="pi-file" accept=".xlsx,.xls,.xlsm,.csv"></label>
       </div>
       <div id="pi-preview" class="muted" style="margin-top:10px;font-size:13px"></div>
       <div class="form-actions"><button class="btn primary" id="pi-save" disabled>Save prices</button></div>`);
-    let parsed = { items: [], skipped: [] };
+    let parsed = { items: [], skipped: [] }, book = null;   // book: [{region, sheet, items}] when a multi-tab workbook is chosen
     const preview = () => {
+      book = null; $('#pi-reg').disabled = false; $('#pi-save').textContent = 'Save prices';
       parsed = parsePriceText($('#pi-text').value);
       const tree = parsed.items.filter(p => sizeRule(p.description));
       $('#pi-preview').innerHTML = !parsed.items.length ? '' : `<b style="color:var(--ink)">${parsed.items.length} items read</b>${parsed.skipped.length ? ` · ${parsed.skipped.length} lines skipped` : ''} · ${tree.length} priced by tree size (${tree.map(p => { const r = sizeRule(p.description); return (r.kind === 'prune' ? 'prune ' : 'remove ') + (r.max === Infinity ? '>' + Math.floor(r.min) : r.min + '–' + r.max) + '"'; }).join(', ')})
@@ -2106,22 +2136,56 @@
       try {
         await waitFor(() => window.XLSX, 10000);
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
-        $('#pi-text').value = rows.map(r => r.map(c => String(c).trim()).filter(Boolean).join('\t')).filter(Boolean).join('\n');
         if (!$('#pi-sheet').value) $('#pi-sheet').value = f.name.replace(/\.[^.]+$/, '');
-        preview();
+        const tabs = wb.SheetNames.map(name => {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+          const items = rows.map(priceRow).filter(Boolean);
+          return { name, rows, items, region: items.length ? regionForSheet(name, items) : null };
+        });
+        const withItems = tabs.filter(t => t.items.length);
+        if (withItems.length <= 1) {   // one price list: show it in the box for the chosen region
+          const t = withItems[0] || tabs[0];
+          $('#pi-text').value = t.items.map(p => [p.item_no, p.description, p.unit_price, p.unit].join('\t')).join('\n');
+          if (t.region) $('#pi-reg').value = t.region;
+          return preview();
+        }
+        $('#pi-text').value = '';
+        const dup = {}; withItems.forEach(t => { if (t.region) dup[t.region] = (dup[t.region] || 0) + 1; });
+        book = withItems.filter(t => t.region && dup[t.region] === 1).map(t => ({ region: t.region, sheet: t.name, items: t.items }));
+        const unmatched = withItems.filter(t => !t.region || dup[t.region] > 1), empty = tabs.filter(t => !t.items.length);
+        $('#pi-reg').disabled = true;
+        $('#pi-preview').innerHTML = `<b style="color:var(--ink)">${book.length} region${book.length === 1 ? '' : 's'} found in this workbook</b> — each replaces that region's current prices.
+          <table class="lines"><thead><tr><th>Region</th><th>Tab</th><th class="r">Items</th><th>Priced by tree size</th></tr></thead><tbody>${book.map(b => `<tr><td><b>${esc(RMAP[b.region].name)}</b></td><td>${esc(b.sheet)}</td><td class="r">${b.items.length}</td><td class="muted">${esc(bandText(b.items).join(', ') || '—')}</td></tr>`).join('')}</tbody></table>
+          ${book.some(b => b.items.some(p => !p.unit)) ? `<div style="color:var(--danger);margin-top:6px">No unit of measure: ${book.flatMap(b => b.items.filter(p => !p.unit).map(p => esc(RMAP[b.region].name + ' #' + p.item_no + ' ' + p.description))).join('; ')}. They'll import, but fill the unit in the spreadsheet and re-import when you can.</div>` : ''}
+          ${unmatched.length ? `<div style="color:var(--danger);margin-top:6px">Not imported — couldn't tell which region: ${unmatched.map(t => esc(t.name)).join(', ')}. Rename the tab to the region name, or paste it in by itself.</div>` : ''}
+          ${empty.length ? `<div style="margin-top:6px">Skipped (no prices yet): ${empty.map(t => esc(t.name)).join(', ')}</div>` : ''}
+          <details style="margin-top:6px"><summary>Check the rows</summary>${book.map(b => `<div class="sec">${esc(RMAP[b.region].name)}</div><table class="lines"><tbody>${b.items.map(p => `<tr><td>${esc(p.item_no)}</td><td>${esc(p.description)}</td><td class="r">${money(p.unit_price)}</td><td>${esc(p.unit)}</td></tr>`).join('')}</tbody></table>`).join('')}</details>`;
+        $('#pi-save').disabled = !book.length;
+        $('#pi-save').textContent = book.length > 1 ? `Save prices for ${book.length} regions` : 'Save prices';
       } catch (err) { toast('Could not read that file: ' + (err && err.message || 'spreadsheet reader did not load'), 5000); }
     };
-    $('#pi-save').onclick = async () => {
-      const rg = $('#pi-reg').value, btn = $('#pi-save'); btn.disabled = true; btn.textContent = 'Saving…';
+    const saveRegion = async (rg, items, sheet) => {
       const { error: e1 } = await sb.from('price_items').update({ active: false }).eq('region', rg).eq('active', true);
-      if (e1) { btn.disabled = false; btn.textContent = 'Save prices'; return toast(e1.message, 5000); }
-      const rows = parsed.items.map((p, i) => ({ ...p, region: rg, sheet: $('#pi-sheet').value.trim() || null, effective: $('#pi-eff').value || null, active: true, sort: i }));
+      if (e1) return e1.message;
+      const rows = items.map((p, i) => ({ ...p, region: rg, sheet, effective: $('#pi-eff').value || null, active: true, sort: i }));
       for (let i = 0; i < rows.length; i += 200) {
         const { error } = await sb.from('price_items').insert(rows.slice(i, i + 200));
-        if (error) { btn.disabled = false; btn.textContent = 'Try again'; return toast('Could not save prices: ' + error.message, 6000); }
+        if (error) return error.message;
       }
-      await loadPrices(); closeDlg(); toast(`${rows.length} ${RMAP[rg].name} prices saved.`);
+      return null;
+    };
+    $('#pi-save').onclick = async () => {
+      const btn = $('#pi-save'), label = btn.textContent; btn.disabled = true; btn.textContent = 'Saving…';
+      const name = $('#pi-sheet').value.trim();
+      const jobs = book ? book.map(b => ({ rg: b.region, items: b.items, sheet: [name, b.sheet].filter(Boolean).join(' · ') })) : [{ rg: $('#pi-reg').value, items: parsed.items, sheet: name || null }];
+      const done = [];
+      for (const j of jobs) {
+        const err = await saveRegion(j.rg, j.items, j.sheet);
+        if (err) { await loadPrices(); btn.disabled = false; btn.textContent = 'Try again'; return toast(`${done.length ? 'Saved ' + done.join(', ') + '. ' : ''}Could not save ${RMAP[j.rg].name} prices: ${err}`, 7000); }
+        done.push(RMAP[j.rg].name);
+      }
+      await loadPrices(); closeDlg();
+      toast(jobs.length > 1 ? `Prices saved for ${done.join(', ')} (${jobs.reduce((a, j) => a + j.items.length, 0)} items).` : `${jobs[0].items.length} ${RMAP[jobs[0].rg].name} prices saved.`, 5000);
     };
   }
   function viewPrices(region) {
@@ -2196,13 +2260,13 @@
       for (const [id, n] of by) { const it = items.find(p => p.id === id); lines.unshift({ auto: true, item_id: it.id, item_no: it.item_no, description: it.description, unit: it.unit, unit_price: +it.unit_price, qty: n }); }
     };
     const draw = () => {
-      const total = lines.reduce((a, l) => a + (+l.qty || 0) * (+l.unit_price || 0), 0);
+      const total = lines.reduce((a, l) => a + amt(l.qty, l.unit_price), 0);
       $('#pp-lines').innerHTML = (P.unpriced && P.unpriced.length ? `<div class="wo" style="border-color:#f5d08a;background:#fffaf0">${P.unpriced.length} tree${P.unpriced.length > 1 ? 's have' : ' has'} no DBH or no matching size in the contract (${P.unpriced.slice(0, 4).map(t => esc((t.uid || '') + ' ' + (t.dbh ? t.dbh + '″' : 'no DBH'))).join(', ')}${P.unpriced.length > 4 ? '…' : ''}). Add a line for ${P.unpriced.length > 1 ? 'them' : 'it'} below if needed.</div>` : '') +
         (lines.length ? `<table class="lines"><thead><tr><th>Item</th><th class="r">Unit price</th><th class="r">Qty</th><th class="r">Amount</th><th></th></tr></thead><tbody>${lines.map((l, i) => `<tr>
           <td>${l.item_id ? '' : '<span class="nc">NOT IN CONTRACT</span><br>'}${l.item_no ? '#' + esc(l.item_no) + ' ' : ''}${esc(l.description)}${l.unit ? ` <span class="muted">/ ${esc(l.unit)}</span>` : ''}</td>
           <td class="r">${l.item_id ? money(l.unit_price) : `<input type="number" step="0.01" inputmode="decimal" data-price="${i}" value="${l.unit_price ?? ''}">`}</td>
           <td class="r"><input type="number" step="any" inputmode="decimal" data-qty="${i}" value="${l.qty ?? ''}"></td>
-          <td class="r">${money((+l.qty || 0) * (+l.unit_price || 0))}</td>
+          <td class="r">${money(amt(l.qty, l.unit_price))}</td>
           <td><button type="button" class="btn small" data-del="${i}" title="Remove">×</button></td></tr>`).join('')}</tbody>
           <tfoot><tr><td colspan="3">Total</td><td class="r">${money(total)}</td><td></td></tr></tfoot></table>` : '<div class="muted" style="font-size:13px">No line items yet — add contract items below.</div>');
       $('#pp-lines').querySelectorAll('[data-qty]').forEach(el => el.onchange = () => { lines[+el.dataset.qty].qty = el.value === '' ? '' : +el.value; draw(); });
