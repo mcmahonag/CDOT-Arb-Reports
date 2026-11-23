@@ -101,7 +101,14 @@
   .adjust { position: absolute; z-index: 600; top: 12px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 24px)); background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   .adjust .adj-actions { margin-left: auto; display: flex; gap: 6px; }
   .locate-btn { position: absolute; z-index: 500; left: 10px; top: 84px; width: 34px; height: 34px; border-radius: 6px; border: 2px solid rgba(0,0,0,.2); background: #fff; font-size: 18px; line-height: 1; color: var(--ink-2); }
-  .locate-btn.on { color: #1a73e8; }
+  .locate-btn.on { color: #1a73e8; border-color: #1a73e8; }
+  .locate-btn.follow { background: #1a73e8; color: #fff; }
+  .locate-btn#btn-locate { font-size: 20px; }
+  .me-icon { pointer-events: none; }
+  .me-dot { position: absolute; left: 13px; top: 13px; width: 18px; height: 18px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 1.5px #0b4fb3, 0 2px 8px rgba(0,0,0,.45); box-sizing: border-box; }
+  .me-pulse { position: absolute; left: 2px; top: 2px; width: 40px; height: 40px; border-radius: 50%; background: rgba(26,115,232,.35); animation: me-pulse 1.8s ease-out infinite; }
+  @keyframes me-pulse { 0% { transform: scale(.35); opacity: .9; } 100% { transform: scale(1.25); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .me-pulse { animation: none; opacity: .35; } }
   .gpsbox { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
   .gps-acc { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; grid-row: span 2; }
   .gps-acc.good { color: #0b7a35; } .gps-acc.ok { color: #8a6100; } .gps-acc.poor { color: var(--danger); }
@@ -792,6 +799,7 @@
     L.control.layers(bases, null, { position: 'topright', collapsed: isPhone() }).addTo(map);
     map.on('baselayerchange', e => { try { localStorage.setItem('arb-basemap', e.name); } catch (err) {} });
     renderer = L.canvas({ padding: 0.5, tolerance: TOUCH ? 14 : 6 });
+    map.on('dragstart', () => { if (follow) { follow = false; $('#btn-locate').classList.remove('follow'); } });
     // Fingers miss small dots: a tap that doesn't hit a dot opens the nearest tree within reach
     map.on('click', e => {
       if (Date.now() - lastDotClick < 400 || $('#crosshair') && !$('#crosshair').classList.contains('hidden')) return;
@@ -834,7 +842,7 @@
         markers.addLayer(m); if (!pts.length) pts.push([v.lat, v.lng]);
       }
     }
-    if ((fit || !renderMap.fitted) && pts.length) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 17 }); renderMap.fitted = true; }
+    if ((fit || !renderMap.fitted) && pts.length && !follow) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 17 }); renderMap.fitted = true; }
   }
   const cssCache = {};
   const getCss = v => cssCache[v] || (cssCache[v] = getComputedStyle(document.documentElement).getPropertyValue(v).trim());
@@ -1184,23 +1192,30 @@
   }
 
   // ---------- "You are here" on the map ----------
-  let me = null, meWatch = null;
+  // A pulsing blue marker drawn above the tree dots. ◎ centers on you and follows as you walk;
+  // dragging the map pauses following, tapping ◎ again re-centers.
+  let me = null, meWatch = null, follow = false, lastFix = null;
+  const meIcon = () => L.divIcon({ className: 'me-icon', html: '<div class="me-pulse"></div><div class="me-dot"></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
   function showMe(p) {
     if (!map) return;
     const ll = [p.coords.latitude, p.coords.longitude];
-    if (!me) me = { ring: L.circle(ll, { radius: p.coords.accuracy, color: '#1a73e8', weight: 1, fillOpacity: 0.12, interactive: false }).addTo(map),
-                    dot: L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#1a73e8', fillOpacity: 1, interactive: false }).addTo(map) };
+    lastFix = { ll, acc: p.coords.accuracy };
+    if (!me) me = { ring: L.circle(ll, { radius: p.coords.accuracy, color: '#1a73e8', weight: 1.5, opacity: 0.6, fillColor: '#1a73e8', fillOpacity: 0.1, interactive: false }).addTo(map),
+                    dot: L.marker(ll, { icon: meIcon(), interactive: false, keyboard: false, zIndexOffset: 2000 }).addTo(map) };
     else { me.ring.setLatLng(ll); me.ring.setRadius(p.coords.accuracy); me.dot.setLatLng(ll); }
+    if (follow) map.panTo(ll, { animate: true });
   }
+  function clearMe() { if (me) { me.ring.remove(); me.dot.remove(); me = null; } }
+  // Zoom to the first fix (survey, inventory, ◎) and keep following until the map is dragged
+  function zoomToMe(ll) { follow = true; $('#btn-locate').classList.add('on', 'follow'); map.setView(ll, Math.max(map.getZoom ? map.getZoom() : 0, 19)); }
   function toggleLocate(btn) {
-    if (meWatch != null) {
-      navigator.geolocation.clearWatch(meWatch); meWatch = null; btn.classList.remove('on');
-      if (me) { me.ring.remove(); me.dot.remove(); me = null; }
-      return;
+    if (meWatch != null || survey || invPanel) {
+      if (lastFix) { zoomToMe(lastFix.ll); return; }
     }
+    if (meWatch != null) return;
     btn.classList.add('on'); let first = true;
-    meWatch = navigator.geolocation.watchPosition(p => { showMe(p); if (first) { map.setView([p.coords.latitude, p.coords.longitude], 19); first = false; } },
-      e => { toast(e.code === 1 ? 'Location permission is off for this site.' : 'No GPS fix: ' + e.message, 4000); toggleLocate(btn); },
+    meWatch = navigator.geolocation.watchPosition(p => { showMe(p); if (first) { zoomToMe([p.coords.latitude, p.coords.longitude]); first = false; } },
+      e => { toast(e.code === 1 ? 'Location permission is off for this site. Allow it in your browser settings.' : 'No GPS fix: ' + e.message, 4000); navigator.geolocation.clearWatch(meWatch); meWatch = null; btn.classList.remove('on', 'follow'); },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
   }
 
@@ -1400,16 +1415,18 @@
       survey && survey.reads.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() });
       if (survey && survey.reads.length > 60) survey.reads.shift();
       showMe(p); renderSurveyHead();
+      if (survey && !survey.zoomed) { survey.zoomed = true; zoomToMe([p.coords.latitude, p.coords.longitude]); }
     }, e => { if (survey) { survey.gpsErr = e.code === 1 ? 'Location permission is off for this site' : e.message; renderSurveyHead(); } },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
     $('#survey').classList.remove('hidden'); $('.legend').classList.add('hidden');
+    if (lastFix) { survey.zoomed = true; zoomToMe(lastFix.ll); }
     refresh(true).then(renderSurvey);
   }
   function closeSurvey() {
     if (!survey) return;
     navigator.geolocation.clearWatch(survey.watch);
     S.f.site = survey.prevSite; survey = null;
-    if (me && meWatch == null) { me.ring.remove(); me.dot.remove(); me = null; }
+    if (meWatch == null) { clearMe(); follow = false; $('#btn-locate').classList.remove('on', 'follow'); }
     $('#survey').classList.add('hidden'); $('.legend').classList.remove('hidden');
     refresh(true);
   }
@@ -1560,15 +1577,17 @@
       invPanel.reads.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() });
       if (invPanel.reads.length > 60) invPanel.reads.shift();
       showMe(p); invGpsBadge();
+      if (invPanel && !invPanel.zoomed) { invPanel.zoomed = true; zoomToMe([p.coords.latitude, p.coords.longitude]); }
     }, e => { if (invPanel) { invPanel.gpsErr = e.code === 1 ? 'Location permission is off for this site' : e.message; invGpsBadge(); } },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
     setView('map'); $('#inv').classList.remove('hidden'); $('.legend').classList.add('hidden'); updateMapTools();
     renderInv();
+    if (lastFix) { invPanel.zoomed = true; setTimeout(() => zoomToMe(lastFix.ll), 60); }
   }
   function closeInv() {
     if (!invPanel) return;
     navigator.geolocation.clearWatch(invPanel.watch); invPanel = null;
-    if (me && meWatch == null) { me.ring.remove(); me.dot.remove(); me = null; }
+    if (meWatch == null) { clearMe(); follow = false; $('#btn-locate').classList.remove('on', 'follow'); }
     $('#inv').classList.add('hidden'); $('.legend').classList.remove('hidden'); updateMapTools(); renderMap();
   }
   function invFix() {
@@ -1619,7 +1638,7 @@
       else P.site = e.target.value;
       renderInv();
       const pts = allTrees.filter(t => t.region === P.region && t.site === P.site && t.lat != null).map(t => [t.lat, t.lng]);
-      if (pts.length && map) map.fitBounds(pts, { padding: [30, 30], maxZoom: 18 });
+      if (pts.length && map) { follow = false; $('#btn-locate').classList.remove('follow'); map.fitBounds(pts, { padding: [30, 30], maxZoom: 18 }); }
     };
     $('#i-planter').onchange = e => { P.planter = e.target.value.trim(); };
     $('#i-drop').onclick = () => {
