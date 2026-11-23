@@ -89,7 +89,7 @@ For a brand-new database, run `schema.sql`, then 004 through 009. Don't re-run `
 
 ## Work orders
 
-- **Issue:** staff issue an order from a tree's panel (prune, remove, treat, inspect), or use **Work order for these trees** to cover everything in the current filter, e.g. a storm event.
+- **Issue:** staff issue an order from a tree's panel (prune, remove, treat, inspect), or use **Work order for these trees** to cover everything in the current filter, e.g. a storm event. Filters include **Genus / species** and a **DBH** range, so region-wide programs (e.g. all Southwest *Tilia cordata* 6–12") take a few clicks; the order records the filter it covers.
 - **Alert:** contractors see a count on the **Work orders** button and a ring around each ordered tree on the map (red = urgent).
 - **Complete:** **Mark complete** records the date and notes and updates the tree in the latest report. Prune sets the last-pruned date, remove marks the tree removed, and treat sets the treatment date.
 

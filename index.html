@@ -87,7 +87,7 @@
 
   .f-group { margin-bottom: 14px; }
   .f-group label.f { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-3); margin-bottom: 5px; }
-  .f-group input[type=search], .f-group select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; }
+  .f-group input[type=search], .f-group input[type=number], .f-group select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: #fff; }
   .checks label { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 13px; }
   .checks .n { margin-left: auto; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
   .f-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -314,6 +314,7 @@
 
   .only-mobile { display: none; }
   .only-mobile-block { display: none; }
+  .dbh-range { display: flex; align-items: center; gap: 6px; } .dbh-range input { width: 0; flex: 1; min-width: 0; } .dbh-range span { color: var(--muted); font-size: 12px; }
   @media (max-width: 1500px) { header.top .chip small { display: none; } }
   @media (max-width: 1400px) and (min-width: 821px) { header.top .wo-txt { display: none; } header.top .wo-ico { display: inline; } }
   @media (max-width: 1150px) and (min-width: 821px) { .brand span { display: none; } header.top { gap: 8px; } }
@@ -404,8 +405,12 @@
       <select id="f-site"></select>
     </div>
     <div class="f-group">
-      <label class="f" for="f-genus">Genus</label>
+      <label class="f" for="f-genus">Genus / species</label>
       <select id="f-genus"></select>
+    </div>
+    <div class="f-group">
+      <label class="f" for="f-dmin">DBH (inches)</label>
+      <div class="dbh-range"><input type="number" id="f-dmin" min="0" step="0.5" inputmode="decimal" placeholder="min"><span>to</span><input type="number" id="f-dmax" min="0" step="0.5" inputmode="decimal" placeholder="max"></div>
     </div>
     <div class="f-group">
       <label class="f">Status</label>
@@ -527,7 +532,7 @@
     month: 'latest',
     region: 'all',
     view: 'map',
-    f: { q: '', site: '', genus: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' },
+    f: { q: '', site: '', genus: '', species: '', dmin: '', dmax: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' },
     sort: { key: 'site', dir: 1 },
     notes: new Map(),         // tree_key -> [note]
     locs: new Map(),          // tree_key -> {lat, lng} saved adjustments
@@ -681,6 +686,12 @@
       if (skip !== 'status' && !S.f.status.has(t.status)) return false;
       if (S.f.site && t.region + '|' + t.site !== S.f.site) return false;
       if (S.f.genus && t.genus !== S.f.genus) return false;
+      if (S.f.species && String(t.species || '').toLowerCase() !== S.f.species) return false;
+      if (S.f.dmin !== '' || S.f.dmax !== '') {
+        const d = parseFloat(t.dbh); if (!isFinite(d)) return false;
+        if (S.f.dmin !== '' && d < +S.f.dmin) return false;
+        if (S.f.dmax !== '' && d > +S.f.dmax) return false;
+      }
       if (S.f.size && t.pruneCat !== S.f.size) return false;
       if (S.f.pruned) {
         const y = (t.prunedYM || '').slice(0, 4);
@@ -704,8 +715,15 @@
       const s = sites.filter(x => x.region === r.id); if (!s.length) return '';
       return `<optgroup label="${esc(r.name)}">` + s.map(x => `<option value="${esc(x.region + '|' + x.site)}" ${S.f.site === x.region + '|' + x.site ? 'selected' : ''}>${esc(x.site)}</option>`).join('') + '</optgroup>';
     }).join('');
-    const genera = {}; all.forEach(t => { if (t.genus) genera[t.genus] = (genera[t.genus] || 0) + 1; });
-    $('#f-genus').innerHTML = `<option value="">All genera</option>` + Object.entries(genera).sort((a, b) => a[0].localeCompare(b[0])).map(([g, n]) => `<option ${S.f.genus === g ? 'selected' : ''} value="${esc(g)}">${esc(g)} (${n})</option>`).join('');
+    // Genus, then each species under it: "All Gleditsia (210)", "Gleditsia triacanthos (198)"…
+    const genera = {};
+    all.forEach(t => { if (!t.genus) return; const g = genera[t.genus] || (genera[t.genus] = { n: 0, sp: {} }); g.n++; const sp = String(t.species || '').trim().toLowerCase(); if (sp && !/^sp\.?$/.test(sp)) g.sp[sp] = (g.sp[sp] || 0) + 1; });
+    const cur = S.f.genus ? (S.f.species ? 's|' + S.f.genus + '|' + S.f.species : 'g|' + S.f.genus) : '';
+    $('#f-genus').innerHTML = `<option value="">All trees</option>` + Object.entries(genera).sort((a, b) => a[0].localeCompare(b[0])).map(([g, o]) => {
+      const sps = Object.entries(o.sp).sort((a, b) => b[1] - a[1]);
+      const gOpt = `<option value="g|${esc(g)}" ${cur === 'g|' + g ? 'selected' : ''}>${sps.length ? 'All ' : ''}${esc(g)} (${nf(o.n)})</option>`;
+      return sps.length ? `<optgroup label="${esc(g)}">${gOpt}${sps.map(([sp, n]) => `<option value="s|${esc(g)}|${esc(sp)}" ${cur === 's|' + g + '|' + sp ? 'selected' : ''}>${esc(g)} ${esc(sp)} (${nf(n)})</option>`).join('')}</optgroup>` : gOpt;
+    }).join('');
 
     const st = filterTrees(all, 'status');
     $('#f-status').innerHTML = STATUS.map(([k, l]) => {
@@ -734,10 +752,27 @@
   let qTimer;
   $('#f-q').oninput = e => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = e.target.value; refresh(); }, 200); };
   $('#f-site').onchange = e => { S.f.site = e.target.value; refresh(true); };
-  $('#f-genus').onchange = e => { S.f.genus = e.target.value; refresh(); };
+  $('#f-genus').onchange = e => { const [k, g, sp] = e.target.value.split('|'); S.f.genus = k ? g : ''; S.f.species = k === 's' ? sp : ''; refresh(); };
+  let dTimer;
+  ['dmin', 'dmax'].forEach(k => $('#f-' + k).oninput = () => { clearTimeout(dTimer); dTimer = setTimeout(() => {
+    for (const j of ['dmin', 'dmax']) { const v = $('#f-' + j).value.trim(); S.f[j] = v === '' || !isFinite(+v) ? '' : v; }
+    refresh(); }, 300); });
+  // Plain-English description of the current filter, shown on batch work orders and proposals
+  function filterSummary() {
+    const bits = [];
+    bits.push(S.region === 'all' ? 'All regions' : RMAP[S.region].name);
+    if (S.f.site) bits.push(S.f.site.split('|')[1]);
+    if (S.f.genus) bits.push(S.f.genus + (S.f.species ? ' ' + S.f.species : ''));
+    if (S.f.dmin !== '' && S.f.dmax !== '') bits.push(`DBH ${S.f.dmin}–${S.f.dmax}"`); else if (S.f.dmin !== '') bits.push(`DBH ${S.f.dmin}"+`); else if (S.f.dmax !== '') bits.push(`DBH up to ${S.f.dmax}"`);
+    if (S.f.size) bits.push('size class ' + S.f.size);
+    if (S.f.pruned) bits.push(S.f.pruned === 'never' ? 'no pruning date' : 'last pruned ' + S.f.pruned + ' or earlier');
+    for (const k of S.f.issues) { const i = ISSUES.find(x => x[0] === k); if (i) bits.push(i[1]); }
+    if (S.f.q.trim()) bits.push('“' + S.f.q.trim() + '”');
+    return bits.join(' · ');
+  }
   $('#f-pruned').onchange = e => { S.f.pruned = e.target.value; refresh(); };
   $('#f-size').onchange = e => { S.f.size = e.target.value; refresh(); };
-  $('#f-clear').onclick = () => { S.f = { q: '', site: '', genus: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' }; $('#f-q').value = ''; refresh(true); };
+  $('#f-clear').onclick = () => { S.f = { q: '', site: '', genus: '', species: '', dmin: '', dmax: '', status: new Set(['tree', 'vacant', 'removed', 'unknown']), issues: new Set(), pruned: '', size: '' }; $('#f-q').value = ''; $('#f-dmin').value = ''; $('#f-dmax').value = ''; refresh(true); };
   $('#f-csv').onclick = exportCsv;
   $('#btn-filters').onclick = () => $('#filters').classList.add('open');
   $('#f-done').onclick = () => $('#filters').classList.remove('open');
@@ -2001,7 +2036,7 @@
       ['Survey a whole site', `Tap <b>📍 Survey locations</b>, pick the site, then stand at any tree and tap <b>Here</b> on its card. Order doesn’t matter — handy on wide medians with several rows. Tap a dot on the map to jump to its card; <b>Not located yet</b> shows what’s left.`],
     ]],
     ['Proposals (contractor → CDOT)', [
-      ['Propose work to CDOT', `<ol><li>Open a tree and tap <b>Propose work</b> — or filter to the trees you want (a site, a species, a condition) and tap <b>Proposal for these trees</b> in the filters.</li><li>Pick the work (treatment, pruning, removal…), describe what you found and what you recommend, and add photos.</li><li>Pruning and removal price themselves from each tree’s DBH using the contract size classes. For other work, search the contract (e.g. “chemical application”) and enter the quantity (hours, pounds, each).</li><li>Tap <b>Send to CDOT</b>. CDOT gets it right away.</li></ol>Prices always come from the contract price sheet. Items that aren’t in the contract can be added, but they’re clearly flagged for CDOT.`],
+      ['Propose work to CDOT', `<ol><li>Open a tree and tap <b>Propose work</b> — or filter to the trees you want and tap <b>Proposal for these trees</b> in the filters. It can be as wide as a whole region — e.g. region <b>Southwest</b>, <b>Genus / species</b> = Tilia cordata, <b>DBH</b> 13 to 26 — and the proposal shows exactly what it covers.</li><li>Pick the work (treatment, pruning, removal…), describe what you found and what you recommend, and add photos.</li><li>Pruning and removal price themselves from each tree’s DBH using the contract size classes. For other work, search the contract (e.g. “chemical application”) and enter the quantity (hours, pounds, each).</li><li>Tap <b>Send to CDOT</b>. CDOT gets it right away.</li></ol>Prices always come from the contract price sheet. Items that aren’t in the contract can be added, but they’re clearly flagged for CDOT.`],
       ['Questions, approval and work orders', `CDOT can approve, decline or ask a question. A question shows a count on 📝 <b>Proposals</b> — open it, type your reply and tap <b>Send reply</b>. When CDOT approves, a work order is created for each tree; complete them as usual and the report updates. <b>Print / PDF</b> gives a copy for your records.`],
     ]],
     ['New GPS inventory', [
@@ -2020,7 +2055,7 @@
   ];
   const HELP_STAFF = ['For CDOT staff', [
     ['Give a contractor access', `Add their login in Supabase (Authentication → Users → Add user, auto-confirm), then open <b>People</b>: set role <b>Contractor</b>, the company, and tick their regions.`],
-    ['Issue work orders', `From a tree: <b>Issue work order</b>. After a storm: filter the map/table to the trees you want (site, condition, search), then <b>Work order for these trees</b> in the filters panel. Set urgent/routine, due date and an event name.`],
+    ['Issue work orders', `From a tree: <b>Issue work order</b>. For a storm or a region-wide program: filter to the trees you want — region, site, <b>Genus / species</b>, <b>DBH</b> range, condition, last pruned — then <b>Work order for these trees</b> in the filters panel. The order shows the filter it covers (e.g. “Southwest · Tilia cordata · DBH 6–12"”). Set urgent/routine, due date and an event name.`],
     ['Review best-guess tree IDs', `Filter <b>Tree ID matched by best guess</b> after an import and confirm each (<b>Same tree</b> / <b>Different tree — new ID</b>). Use <b>Merge into…</b> when two IDs are the same tree.`],
     ['Contract prices and proposals', `Open <b>Reports</b> → <b>Contract prices</b> → <b>Import</b> for a region and paste the rows from the price sheet (item no., description, unit price, unit) or choose the Excel file. Pruning and removal items with a size range in the name (e.g. “6-12 IN.”, “OVER 45" DBH”) are used to price proposals by tree size automatically. Incoming proposals show a count on <b>Proposals</b>; approving one issues a work order for each tree.`],
     ['Publish an inventory', `When a region’s inventory is done, open <b>Reports</b> → <b>Publish as report</b>. It becomes the base for future field reports; publishing again replaces it.`],
@@ -2217,9 +2252,9 @@
   $('#f-prop').onclick = () => {
     const trees = S.filtered.filter(t => t.status !== 'removed');
     if (!trees.length) return toast('No trees in the current filter.');
-    proposalBuilder(trees);
+    proposalBuilder(trees, filterSummary());
   };
-  function proposalBuilder(trees) {
+  function proposalBuilder(trees, scope) {
     const regs = [...new Set(trees.map(t => t.region))];
     if (regs.length > 1) return toast('Pick trees from one region at a time (use the region buttons or a site filter).', 4500);
     const region = regs[0];
@@ -2229,7 +2264,7 @@
     const lines = [];   // {auto?, item_id?, item_no, description, unit, unit_price, qty, note}
     const P = { service: 'treat' };
     const body = dlg('Propose work to CDOT', `
-      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(RMAP[region].name)} · ${nf(trees.length)} tree${trees.length > 1 ? 's' : ''} · ${sites.length > 2 ? sites.length + ' sites' : esc(sites.join(', '))}${items.length ? '' : ' · <b style="color:var(--danger)">no contract prices loaded for this region yet</b>'}</div>
+      ${scope ? `<div style="font-size:12px;margin-bottom:2px"><b>Covers:</b> ${esc(scope)}</div>` : ''}<div class="muted" style="font-size:12px;margin-bottom:8px">${esc(RMAP[region].name)} · ${nf(trees.length)} tree${trees.length > 1 ? 's' : ''} · ${sites.length > 2 ? sites.length + ' sites' : esc(sites.join(', '))}${items.length ? '' : ' · <b style="color:var(--danger)">no contract prices loaded for this region yet</b>'}</div>
       <div class="form-grid">
         <label>Work<select id="pp-svc">${Object.entries(SVC).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label>Priority<select id="pp-pri"><option value="routine">Routine</option><option value="urgent">Urgent</option></select></label>
@@ -2246,7 +2281,7 @@
       <div class="sec">Photos</div>
       <input type="file" id="pp-photos" accept="image/*" multiple>
       <div class="form-actions"><button class="btn primary" id="pp-send">Send to CDOT</button></div>`);
-    const titleAuto = () => `${SVC[$('#pp-svc').value]} — ${trees.length} tree${trees.length > 1 ? 's' : ''}, ${sites.length > 1 ? sites.length + ' sites' : sites[0]}`;
+    const titleAuto = () => scope && sites.length > 1 ? `${SVC[$('#pp-svc').value]} — ${scope} (${nf(trees.length)} trees, ${sites.length} sites)` : `${SVC[$('#pp-svc').value]} — ${trees.length} tree${trees.length > 1 ? 's' : ''}, ${sites.length > 1 ? sites.length + ' sites' : sites[0]}`;
     $('#pp-title').value = titleAuto();
     const autoLines = () => {
       for (let i = lines.length - 1; i >= 0; i--) if (lines[i].auto) lines.splice(i, 1);
@@ -2469,7 +2504,7 @@
     const trees = S.filtered.filter(t => t.status === 'tree');
     if (!trees.length) return toast('No trees in the current filter.');
     if (trees.length > 300 && !confirm(`Issue work orders for ${nf(trees.length)} trees?`)) return;
-    dlg(`Work order for ${nf(trees.length)} filtered trees`, orderForm(trees.length));
+    dlg(`Work order for ${nf(trees.length)} filtered trees`, `<div class="muted" style="font-size:12px;margin-bottom:8px">${esc(filterSummary())}</div>` + orderForm(trees.length));
     $('#wo-create').onclick = async () => { if (await createOrders(trees)) { closeDlg(); renderView(); } };
   };
   let woTab = 'open', woRegion = 'all';
