@@ -28,6 +28,13 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   html, body { overflow-x: hidden; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  /* The page itself never scrolls or bounces: the header stays pinned and only the views below it scroll */
+  html, body { overflow: hidden; overscroll-behavior: none; }
+  body { height: 100vh; height: 100dvh; }
+  header.top { position: sticky; top: 0; z-index: 950; flex: none; }
+  .tabs { flex: none; }
+  .view, aside.filters, .drawer .body, .modal, .survey .s-list { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .login { overflow: auto; }
   /* iPhone zooms in on any text box under 16px and stays zoomed — keep form text at 16px on touch screens */
   @media (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
   body { display: flex; flex-direction: column; font-size: 14px; }
