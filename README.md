@@ -138,5 +138,5 @@ The **?** button in the header opens a how-to and FAQ written for contractors: g
 
 **Adding a region (e.g. Lake Shore Drive):** run 009 once, then add a line to `REGIONS` in `config.js` (examples are commented in there), and name its tab in the price workbook to match.
 
-Alerts are in the app only. Email notifications can be added later by connecting an email service to Supabase.
+**Notifications (🔔):** the bell counts what's new since each person last opened it. Contractors see new work orders (grouped by batch) and CDOT's questions, approvals and declines. Staff see new proposals, contractor replies and withdrawals, completed work orders and submitted field reports. The app checks every minute while it's open and pops up anything new (urgent items stay until dismissed); the tab title and the home-screen icon badge (where supported) show the count. Email notifications can be added later by connecting an email service to Supabase.
 

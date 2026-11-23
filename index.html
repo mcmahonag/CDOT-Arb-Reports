@@ -310,6 +310,19 @@
   .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-2); }
   .empty-state b { display: block; font-size: 16px; color: var(--ink); margin-bottom: 6px; }
 
+  .nt-list { display: flex; flex-direction: column; }
+  .nt { display: flex; gap: 10px; align-items: flex-start; padding: 9px 6px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 6px; }
+  .nt:hover { background: #f4f7f5; }
+  .nt .ic { font-size: 18px; line-height: 1.2; width: 24px; text-align: center; flex: none; }
+  .nt .tx { flex: 1; min-width: 0; font-size: 13px; }
+  .nt .tx .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .nt.new { background: #eef6f0; } .nt .dn { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); margin-right: 6px; vertical-align: 1px; }
+  .nt .when { color: var(--muted); font-size: 11px; white-space: nowrap; flex: none; }
+  .nt-pop { position: fixed; z-index: 1150; right: 16px; top: 64px; width: min(360px, calc(100vw - 24px)); background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; cursor: pointer; animation: ntin .25s ease-out; }
+  .nt-pop.urgent { border-left-color: var(--danger); }
+  .nt-pop .x { margin-left: auto; border: 0; background: none; font-size: 18px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 2px; }
+  @keyframes ntin { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  #bell-badge { background: var(--danger); color: #fff; }
   .toast { position: fixed; z-index: 1200; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 9px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); }
 
   .only-mobile { display: none; }
@@ -371,6 +384,7 @@
   <div class="regions" id="regions"></div>
   <div class="spacer"></div>
   <select id="month" aria-label="Report month"></select>
+  <button class="btn-ghost hidden" id="btn-bell" title="Notifications" aria-label="Notifications"><span aria-hidden="true">🔔</span> <span class="badge hidden" id="bell-badge"></span></button>
   <button class="btn-ghost hidden" id="btn-orders"><span class="wo-txt">Work orders</span><span class="wo-ico" aria-hidden="true">📋</span> <span class="badge hidden" id="orders-badge"></span></button>
   <button class="btn-ghost hidden" id="btn-people">People</button>
  <button class="btn-ghost hidden" id="btn-props"><span class="wo-txt">Proposals</span><span class="wo-ico" aria-hidden="true">📝</span> <span class="badge hidden" id="props-badge"></span></button>
@@ -2027,6 +2041,7 @@
       ['Submit the report', `When you’re done, open <b>Reports</b> and tap <b>Submit</b>. After submitting you can’t edit it; ask CDOT to <b>Reopen</b> it if something needs fixing. You can tap <b>Excel</b> anytime to download it in the usual one-tab-per-site layout.`],
     ]],
     ['Work orders', [
+      ['Notifications 🔔', `The 🔔 button counts anything new since you last looked: work orders from CDOT, and questions, approvals or declines on your proposals (CDOT staff also see new proposals, replies, completed orders and submitted field reports). The app checks every minute while it’s open, and new items pop up at the top of the screen — urgent ones stay until you close them. Tap a notification to open it. There are no emails or phone push alerts yet, so open the app to check.`],
       ['Seeing your work orders', `The 📋 / <b>Work orders</b> button shows a count of open orders (red if any are urgent). Trees with an order have a ring on the map. Open the list to see what, where, priority, due date and notes from CDOT.`],
       ['Completing a work order', `<ol><li>Open the order (or the tree) and tap <b>Mark complete</b>.</li><li>Enter the date the work was done and a short note.</li><li>Add a photo from the tree’s panel if you have one.</li></ol>Completing it updates the arborist report for you: a <b>prune</b> sets the last-pruned date, a <b>removal</b> marks the tree removed, a <b>treatment</b> records the treatment date.`],
     ]],
@@ -2461,6 +2476,116 @@
   function closeDlg() { $('#dlg').classList.add('hidden'); }
   $('#dlg-close').onclick = closeDlg;
 
+  // ---------- Notifications (in-app) ----------
+  // Built from work orders, proposals and reports; checked every minute while the app is open.
+  const NT_KEY = () => 'cdot-arb-seen:' + (S.user?.id || 'x');
+  const ago = iso => { const m = Math.round((Date.now() - new Date(iso)) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago'; const d = Math.round(h / 24); return d < 8 ? d + ' d ago' : new Date(iso).toLocaleDateString(); };
+  const isMe = who => who && who === me_();
+  const regName = r => RMAP[r]?.name || r;
+  function buildFeed() {
+    const ev = [], staff = isStaff(), mine = new Set(myRegions());
+    // work orders issued (grouped by batch) — for contractors
+    if (!staff) {
+      const g = new Map();
+      for (const o of S.orders) { if (isMe(o.created_by) || !mine.has(o.region)) continue; const k = o.created_at + '|' + o.type + '|' + o.region; if (!g.has(k)) g.set(k, []); g.get(k).push(o); }
+      for (const os of g.values()) {
+        const o = os[0], n = os.length, urgent = os.some(x => x.priority === 'urgent');
+        ev.push({ at: o.created_at, ic: '📋', urgent, region: o.region,
+          text: `New work order${n > 1 ? 's' : ''}: <b>${esc(WO_TYPES[o.type] || o.type)}</b>${n > 1 ? ' · ' + nf(n) + ' trees' : ' · ' + esc(o.tree_label || o.tree_key)}${urgent ? ' · <span style="color:var(--danger);font-weight:700">Urgent</span>' : ''}`,
+          sub: [regName(o.region), o.event, o.due_date ? 'due ' + o.due_date : '', o.created_by ? 'from ' + o.created_by : ''].filter(Boolean).join(' · '),
+          open: () => { woTab = 'open'; woRegion = 'all'; showOrders(); } });
+      }
+    }
+    // work orders completed (grouped by person + hour) — for staff
+    if (staff) {
+      const g = new Map();
+      for (const o of S.orders) { if (o.status !== 'completed' || !o.completed_at || isMe(o.completed_by)) continue; const k = (o.completed_by || '') + '|' + o.completed_at.slice(0, 13) + '|' + o.region; if (!g.has(k)) g.set(k, []); g.get(k).push(o); }
+      for (const os of g.values()) {
+        const last = os.reduce((a, b) => a.completed_at > b.completed_at ? a : b), n = os.length;
+        ev.push({ at: last.completed_at, ic: '✅', region: last.region,
+          text: `<b>${nf(n)} work order${n > 1 ? 's' : ''} completed</b>${n === 1 ? ' · ' + esc(WO_TYPES[last.type] || '') + ' · ' + esc(last.tree_label || last.tree_key) : ''}`,
+          sub: [regName(last.region), last.completed_by ? 'by ' + last.completed_by : ''].filter(Boolean).join(' · '),
+          open: () => { woTab = 'closed'; woRegion = 'all'; showOrders(); } });
+      }
+    }
+    // proposals
+    for (const p of S.proposals) {
+      if (!mine.has(p.region)) continue;
+      const open = () => showProposal(p), title = `<b>${esc(p.number)}</b> ${esc(p.title || SVC[p.service] || '')}`;
+      if (staff && !isMe(p.submitted_by)) ev.push({ at: p.submitted_at, ic: '📝', urgent: p.priority === 'urgent', region: p.region, text: `New proposal ${title}`, sub: [regName(p.region), p.contractor, money(p.total)].filter(Boolean).join(' · '), open });
+      for (const m of p.messages || []) {
+        if (!m.at || isMe(m.by)) continue;
+        if (staff && m.role === 'contractor') ev.push({ at: m.at, ic: m.kind === 'withdrawn' ? '↩️' : '💬', region: p.region, text: `${m.kind === 'withdrawn' ? 'Proposal withdrawn' : 'Contractor replied'} · ${title}`, sub: (m.text || '').slice(0, 120), open });
+        if (!staff && m.role === 'staff') ev.push({ at: m.at, ic: m.kind === 'approved' ? '✅' : m.kind === 'declined' ? '⛔' : '❓', urgent: m.kind === 'question', region: p.region,
+          text: `${m.kind === 'approved' ? 'CDOT approved' : m.kind === 'declined' ? 'CDOT declined' : 'CDOT has a question on'} ${title}`, sub: (m.text || '').slice(0, 120), open });
+      }
+    }
+    // field reports submitted — for staff
+    if (staff) for (const r of (S.ntReports || S.reports)) {
+      if (r.status !== 'submitted' && r.status !== 'final' || !r.submitted_at || isMe(r.submitted_by)) continue;
+      ev.push({ at: r.submitted_at, ic: '📄', region: r.region, text: `<b>${esc(regName(r.region))} field report submitted</b>`, sub: [monthLabel ? monthLabel(r.month) : r.month, r.submitted_by ? 'by ' + r.submitted_by : ''].filter(Boolean).join(' · '), open: () => $('#btn-import').click() });
+    }
+    return ev.filter(e => e.at).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 60);
+  }
+  function ntSeen() {
+    let v = null; try { v = localStorage.getItem(NT_KEY()); } catch (e) {}
+    if (!v) { v = new Date(Date.now() - 7 * 864e5).toISOString(); try { localStorage.setItem(NT_KEY(), v); } catch (e) {} }   // first time: show the last week
+    return v;
+  }
+  function bellBadge() {
+    const btn = $('#btn-bell'); if (S.local) { btn.classList.add('hidden'); return; }
+    btn.classList.remove('hidden');
+    const seen = ntSeen(), feed = buildFeed(), unread = feed.filter(e => e.at > seen);
+    const b = $('#bell-badge'); b.textContent = unread.length; b.classList.toggle('hidden', !unread.length);
+    btn.title = unread.length ? `${unread.length} new notification${unread.length > 1 ? 's' : ''}` : 'Notifications';
+    document.title = (unread.length ? `(${unread.length}) ` : '') + 'Arborist Reports';
+    try { if (navigator.setAppBadge) unread.length ? navigator.setAppBadge(unread.length) : navigator.clearAppBadge(); } catch (e) {}
+    return feed;
+  }
+  function showBell() {
+    const seen = ntSeen(), feed = buildFeed();
+    const body = dlg('Notifications', feed.length ? `<div class="nt-list">${feed.map((e, i) => `<div class="nt ${e.at > seen ? 'new' : ''}" data-i="${i}"><div class="ic">${e.ic}</div><div class="tx">${e.at > seen ? '<span class="dn" aria-label="new"></span>' : ''}${e.text}${e.sub ? `<div class="s">${esc(e.sub)}</div>` : ''}</div><div class="when">${ago(e.at)}</div></div>`).join('')}</div>
+      <p class="muted" style="font-size:12px;margin-top:10px">Checked every minute while the app is open. Showing the latest ${feed.length}.</p>`
+      : `<p class="muted">Nothing yet. New work orders, proposals${isStaff() ? ', completed orders and submitted field reports' : ' and answers from CDOT'} will show up here.</p>`);
+    body.querySelectorAll('.nt').forEach(el => el.onclick = () => { const e = feed[+el.dataset.i]; closeDlg(); setTimeout(e.open, 50); });
+    try { localStorage.setItem(NT_KEY(), new Date().toISOString()); } catch (e) {}
+    bellBadge();
+  }
+  $('#btn-bell').onclick = showBell;
+  // Pop-up for anything that arrives while the app is open
+  function ntPop(e, more) {
+    document.querySelectorAll('.nt-pop').forEach(x => x.remove());
+    const el = document.createElement('div'); el.className = 'nt-pop' + (e.urgent ? ' urgent' : ''); el.setAttribute('role', 'status');
+    el.innerHTML = `<div style="font-size:20px">${e.ic}</div><div class="tx" style="font-size:13px;flex:1">${e.text}${e.sub ? `<div class="muted" style="font-size:12px;margin-top:2px">${esc(e.sub)}</div>` : ''}${more ? `<div class="muted" style="font-size:12px;margin-top:4px">+ ${more} more — tap 🔔</div>` : ''}</div><button class="x" aria-label="Dismiss">×</button>`;
+    el.onclick = ev => { el.remove(); if (ev.target.classList.contains('x')) return; more ? showBell() : e.open(); };
+    document.body.appendChild(el);
+    if (!e.urgent) setTimeout(() => el.remove(), 15000);
+  }
+  let ntLast = null, ntBusy = false;
+  async function ntPoll() {
+    if (S.local || !S.user || ntBusy || document.hidden) return;
+    ntBusy = true;
+    try {
+      const before = new Set(S.orders.filter(o => o.status === 'open').map(o => o.id));
+      const jobs = [loadOrders(), loadProposals()];
+      if (isStaff()) jobs.push(sb.from('reports').select('id, region, month, status, submitted_at, submitted_by').then(({ data }) => { if (data) S.ntReports = data; }));
+      await Promise.all(jobs);
+      const after = S.orders.filter(o => o.status === 'open').map(o => o.id);
+      if (after.length !== before.size || after.some(id => !before.has(id))) renderView();   // work order rings on the map
+      const feed = bellBadge(), fresh = ntLast ? feed.filter(e => e.at > ntLast) : [];
+      if (fresh.length) ntPop(fresh.find(e => e.urgent) || fresh[0], fresh.length - 1);
+      if (feed.length) ntLast = feed[0].at > (ntLast || '') ? feed[0].at : ntLast; else ntLast = ntLast || new Date().toISOString();
+    } catch (e) { /* offline — try again next minute */ }
+    ntBusy = false;
+  }
+  function ntStart() {
+    const feed = bellBadge(); ntLast = feed && feed.length ? feed[0].at : new Date().toISOString();
+    if (!S.ntTimer) {
+      S.ntTimer = setInterval(ntPoll, 60000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) ntPoll(); });
+    }
+  }
+
   // ---------- Work orders ----------
   const WO_TYPES = { prune: 'Prune', remove: 'Remove', treat: 'Treat', inspect: 'Inspect', other: 'Other' };
   async function loadOrders() {
@@ -2869,6 +2994,7 @@
     await Promise.all([loadReports(), isStaff() ? loadNotes() : null, loadLocs(), loadOrders(), loadInventory(), loadPrices(), loadProposals()]);
     if (S.region !== 'all' && !myRegions().includes(S.region)) S.region = 'all';
     renderRegions(); await refresh(true);
+    ntStart();
     openFromLink();
   }
 
